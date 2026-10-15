@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 # CoverUp: MusicBrainz Picard plugin. GPL-2.0-or-later.
-"""Shared Qt widgets: the candidate thumbnail grid and a background-task runner."""
+"""Shared Qt widgets: candidate cards/grid, the big preview, and a background-task runner.
+
+The UI follows the system theme (palette colours); the only fixed colours are the four trust chips,
+which carry meaning: exact release, same album, search match, generated.
+"""
 
 from __future__ import annotations
 
@@ -8,19 +12,51 @@ import logging
 import threading
 from typing import Callable
 
-from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
-from PyQt6.QtWidgets import QAbstractItemView, QListView, QListWidget, QListWidgetItem
+from PyQt6.QtCore import QObject, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap
+from PyQt6.QtWidgets import QAbstractItemView, QLabel, QListView, QListWidget, QListWidgetItem, QSizePolicy, QVBoxLayout, QWidget
 
 from ..model import ArtType, Candidate, Tier
 
 log = logging.getLogger("coverup.ui")
 
 ROLE = Qt.ItemDataRole.UserRole
-THUMB = 150
+THUMB = 156
 
-TIER_TEXT = {Tier.A: "exact release", Tier.B: "release group", Tier.C: "unanchored", Tier.G: "AI/template"}
-TIER_COLOR = {Tier.A: "#2e7d32", Tier.B: "#1565c0", Tier.C: "#8d6e63", Tier.G: "#8e24aa"}
+SOURCE_NAMES = {
+    "caa": "Cover Art Archive",
+    "discogs": "Discogs",
+    "fanart": "Fanart.tv",
+    "audiodb": "TheAudioDB",
+    "itunes": "Apple Music",
+    "deezer": "Deezer",
+    "lastfm": "Last.fm",
+    "websearch": "Web search",
+    "local": "In your folder",
+    "embedded": "Current cover",
+    "manual": "Added by you",
+    "generated": "Generated",
+}
+TRUST = {
+    Tier.A: ("Exact release", "#2e7d32"),
+    Tier.B: ("Same album", "#1565c0"),
+    Tier.C: ("Search match", "#9a5b00"),
+    Tier.G: ("Generated", "#7b1fa2"),
+}
+TRUST_HELP = {
+    Tier.A: "This image belongs to the exact release you tagged (its MusicBrainz or Discogs entry).",
+    Tier.B: "This image belongs to the same album, but possibly another edition.",
+    Tier.C: "Found by searching for the artist and title. It is trusted only when several sources show the same picture.",
+    Tier.G: "Made by CoverUp. It is labelled as generated wherever it is saved.",
+}
+
+
+def source_name(c: Candidate) -> str:
+    return SOURCE_NAMES.get(c.provider, c.provider)
+
+
+def size_text(c: Candidate) -> str:
+    return f"{c.width} × {c.height}" if c.width else "size unknown"
 
 
 class _Bridge(QObject):
@@ -60,110 +96,197 @@ def run_in_background(func: Callable[[], object], callback: Callable[[object, Ba
     threading.Thread(target=work, daemon=True).start()
 
 
-def placeholder_icon(text: str = "…") -> QIcon:
-    pm = QPixmap(THUMB, THUMB)
-    pm.fill(QColor("#555555"))
+def image_of(c: Candidate | None) -> QImage | None:
+    if c is None:
+        return None
+    data = c.thumb_data or c.data
+    if not data:
+        return None
+    img = QImage()
+    return img if img.loadFromData(data) else None
+
+
+def _chip(p: QPainter, x: float, y: float, text: str, color: str, align_right: bool = False, width_limit: float = 999) -> None:
+    f = QFont(p.font())
+    f.setPixelSize(11)
+    f.setBold(True)
+    p.setFont(f)
+    w = min(width_limit, p.fontMetrics().horizontalAdvance(text) + 12)
+    h = 18
+    if align_right:
+        x -= w
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(x, y, w, h), 4, 4)
+    p.fillPath(path, QColor(color))
+    p.setPen(QColor("white"))
+    p.drawText(QRectF(x, y, w, h), Qt.AlignmentFlag.AlignCenter, text)
+
+
+def card_pixmap(c: Candidate, size: int = THUMB, pick: bool = False) -> QPixmap:
+    """Square tile: the image letterboxed, a trust chip, and a 'Pick' chip on CoverUp's choice."""
+    pm = QPixmap(size, size)
+    pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
-    p.setPen(QColor("#dddddd"))
-    p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, text)
-    p.end()
-    return QIcon(pm)
-
-
-def icon_for(c: Candidate) -> QIcon:
-    if c.thumb_data:
-        img = QImage()
-        if img.loadFromData(c.thumb_data):
-            pm = QPixmap.fromImage(
-                img.scaled(THUMB, THUMB, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            )
-            if c.generated:
-                p = QPainter(pm)
-                badge = "AI" if c.extra.get("method") == "ai" else "GEN"
-                p.fillRect(0, 0, 12 + 9 * len(badge), 16, QColor(TIER_COLOR[Tier.G]))
-                p.setPen(QColor("white"))
-                p.drawText(4, 12, badge)
-                p.end()
-            return QIcon(pm)
-    return placeholder_icon("no preview")
-
-
-def describe(c: Candidate) -> str:
-    size = f"{c.width}x{c.height}" if c.width else "size ?"
-    extra = f" · disc {c.disc_number}" if c.art_type == ArtType.DISC and c.disc_number else ""
-    unl = " · unlabelled" if c.art_type == ArtType.OTHER else ""
-    return f"{c.provider}{extra}{unl}\n{size} · {c.tier.value} · {c.score:.0f}"
-
-
-def tooltip(c: Candidate, existing: Candidate | None = None) -> str:
-    lines = [
-        f"<b>{c.provider}</b> ({TIER_TEXT[c.tier]}, tier {c.tier.value})",
-        f"Size: {c.width}x{c.height}" + ("" if c.dims_known else " (not yet measured)"),
-        f"Score: {c.score:.1f}",
-    ]
-    if c.breakdown:
-        lines.append("<br>".join(f"&nbsp;&nbsp;{k}: {v:+.1f}" for k, v in c.breakdown.items()))
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    img = image_of(c)
+    if img is not None:
+        scaled = img.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        p.drawImage(int((size - scaled.width()) / 2), int((size - scaled.height()) / 2), scaled)
+    else:
+        p.fillRect(0, 0, size, size, QColor(128, 128, 128, 60))
+        p.setPen(QColor(128, 128, 128))
+        p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "No preview")
     if c.rejected_reason:
-        lines.append(f"<span style='color:#c62828'>Not eligible: {c.rejected_reason}</span>")
+        p.fillRect(0, 0, size, size, QColor(255, 255, 255, 140))
+    label, color = TRUST[c.tier]
+    if c.generated and c.extra.get("method") == "ai":
+        label = "AI generated"
+    _chip(p, 4, size - 22, label, color)
+    if pick:
+        _chip(p, size - 4, 4, "CoverUp pick", "#00695c", align_right=True)
+    p.end()
+    return pm
+
+
+def card_text(c: Candidate) -> str:
+    extra = ""
+    if c.art_type == ArtType.OTHER:
+        extra = " · unlabelled"
+    elif c.rejected_reason:
+        extra = " · too small" if c.rejected_reason.startswith("Too small") else " · not eligible"
+    return f"{source_name(c)}\n{size_text(c)}{extra}"
+
+
+def tooltip(c: Candidate) -> str:
+    lines = [f"<b>{source_name(c)}</b> · {TRUST[c.tier][0]}", size_text(c)]
+    if c.rejected_reason:
+        lines.append(f"Not used automatically: {c.rejected_reason}")
     if c.comment:
-        lines.append(f"Note: {c.comment}")
-    if c.attribution:
-        lines.append(f"Source: {c.attribution}")
-    if c.generated:
-        lines.append("<b>AI/template-generated art</b>, labelled as such when applied")
-    if existing is not None and existing.width:
-        lines.append(f"Current cover: {existing.width}x{existing.height}")
-    if c.url:
-        lines.append(f"<small>{c.url[:120]}</small>")
+        lines.append(c.comment)
     return "<br>".join(lines)
 
 
 class CandidateGrid(QListWidget):
+    """Thumbnail grid. Single choice by default; booklet and artist slots allow several."""
+
     def __init__(self, multi: bool = False, parent=None):
         super().__init__(parent)
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setIconSize(QSize(THUMB, THUMB))
-        self.setGridSize(QSize(THUMB + 30, THUMB + 54))
+        self.setGridSize(QSize(THUMB + 24, THUMB + 48))
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)
         self.setWordWrap(True)
-        self.setSpacing(4)
+        self.setUniformItemSizes(True)
         self.setSelectionMode(
             QAbstractItemView.SelectionMode.MultiSelection if multi else QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.existing: Candidate | None = None
+        self.pick_id: int | None = None
 
-    def set_candidates(self, cands: list[Candidate], show_rejected: bool = False, preselect: list[Candidate] | None = None) -> None:
-        keep = {id(c) for c in (preselect if preselect is not None else self.selected())}
+    def set_candidates(self, cands: list[Candidate], show_rejected: bool, selected: list[Candidate], pick: Candidate | None = None) -> None:
+        keep = {id(c) for c in selected}
+        self.pick_id = id(pick) if pick is not None else None
+        self.blockSignals(True)
         self.clear()
-        ordered = sorted(cands, key=lambda c: (bool(c.rejected_reason), -c.tier.rank if c.tier != Tier.G else 0, -c.score))
+        ordered = sorted(cands, key=lambda c: (id(c) != self.pick_id, bool(c.rejected_reason), -c.tier.rank if c.tier != Tier.G else 0, -c.score))
         for c in ordered:
             if c.rejected_reason and not show_rejected:
                 continue
-            item = QListWidgetItem(icon_for(c), describe(c))
-            item.setData(ROLE, c)
-            item.setToolTip(tooltip(c, self.existing))
-            if c.rejected_reason:
-                item.setForeground(QColor("#9e9e9e"))
-            else:
-                item.setForeground(QColor(TIER_COLOR[c.tier]))
+            self._add(c, id(c) in keep)
+        self.blockSignals(False)
+
+    def _add(self, c: Candidate, selected: bool, at: int | None = None) -> QListWidgetItem:
+        item = QListWidgetItem(QIcon(card_pixmap(c, pick=id(c) == self.pick_id)), card_text(c))
+        item.setData(ROLE, c)
+        item.setToolTip(tooltip(c))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        if at is None:
             self.addItem(item)
-            if id(c) in keep:
-                item.setSelected(True)
+        else:
+            self.insertItem(at, item)
+        item.setSelected(selected)
+        return item
 
     def add_candidate(self, c: Candidate, select: bool = True) -> None:
-        item = QListWidgetItem(icon_for(c), describe(c))
-        item.setData(ROLE, c)
-        item.setToolTip(tooltip(c, self.existing))
-        self.insertItem(0, item)
-        if select:
-            if self.selectionMode() == QAbstractItemView.SelectionMode.SingleSelection:
-                self.clearSelection()
-            item.setSelected(True)
-            self.scrollToItem(item)
+        if select and self.selectionMode() == QAbstractItemView.SelectionMode.SingleSelection:
+            self.clearSelection()
+        item = self._add(c, select, at=0)
+        self.scrollToItem(item)
 
     def selected(self) -> list[Candidate]:
         return [i.data(ROLE) for i in self.selectedItems()]
 
     def all(self) -> list[Candidate]:
         return [self.item(i).data(ROLE) for i in range(self.count())]
+
+
+class Preview(QWidget):
+    """The large view of one image, with plain-language details and a comparison with the current cover."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumWidth(300)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 0, 0, 0)
+        self.image = QLabel()
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setFixedSize(300, 300)
+        self.title = QLabel()
+        f = self.title.font()
+        f.setPointSizeF(f.pointSizeF() * 1.15)
+        f.setBold(True)
+        self.title.setFont(f)
+        self.details = QLabel()
+        self.details.setWordWrap(True)
+        self.details.setTextFormat(Qt.TextFormat.RichText)
+        self.details.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.image)
+        lay.addWidget(self.title)
+        lay.addWidget(self.details, 1)
+        self.current: Candidate | None = None
+        self.show_empty("Select an image to see it larger.")
+
+    def show_empty(self, text: str) -> None:
+        pm = QPixmap(300, 300)
+        pm.fill(self.palette().color(QPalette.ColorRole.Base))
+        p = QPainter(pm)
+        p.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
+        p.drawRect(0, 0, 299, 299)
+        p.drawText(QRectF(20, 0, 260, 300), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, text)
+        p.end()
+        self.image.setPixmap(pm)
+        self.title.setText("")
+        self.details.setText("")
+
+    def show_candidate(self, c: Candidate | None) -> None:
+        if c is None:
+            self.show_empty("Select an image to see it larger.")
+            return
+        img = image_of(c)
+        if img is not None:
+            self.image.setPixmap(QPixmap.fromImage(img.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
+        else:
+            self.show_empty("No preview available.")
+        label, color = TRUST[c.tier]
+        self.title.setText(source_name(c))
+        rows = [f"<span style='color:{color}; font-weight:600'>{label}</span>: {TRUST_HELP[c.tier]}", f"<b>Size</b>: {size_text(c)}"]
+        cur = self.current
+        if cur is not None and cur.width and c.width and c is not cur:
+            ratio = (c.width * c.height) / max(1, cur.width * cur.height)
+            if ratio > 1.05:
+                rows.append(f"<b>Compared with your current cover</b> ({cur.width} × {cur.height}): {ratio:.1f}× the pixels")
+            elif ratio < 0.95:
+                rows.append(f"<b>Compared with your current cover</b> ({cur.width} × {cur.height}): smaller")
+            else:
+                rows.append("<b>Compared with your current cover</b>: same size")
+        if c.rejected_reason:
+            rows.append(f"<b>Not chosen automatically</b>: {c.rejected_reason}")
+        if c.comment and not c.generated:
+            rows.append(f"<b>Note</b>: {c.comment}")
+        if c.generated:
+            rows.append(f"<b>Style</b>: {c.extra.get('template', '')} (seed {c.extra.get('seed', '')})")
+        if c.score and not c.generated:
+            rows.append(f"<b>Score</b>: {c.score:.0f} of 100")
+        self.details.setText("<br><br>".join(rows))

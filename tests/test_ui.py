@@ -1,4 +1,4 @@
-"""Qt UI smoke tests (off-screen): review dialog search/selection, batch auto-apply, options page round-trip."""
+"""Qt UI tests (off-screen): review dialog, batch auto-apply, options page."""
 
 import pytest
 
@@ -27,15 +27,16 @@ class FakeApi:
 
 def routes():
     A = make_image("a", 1200)
+    img = lambda i, t, u, **k: {"id": i, "types": [t], "image": u, "thumbnails": {"250": u}, **k}  # noqa: E731
     return {
         f"https://musicbrainz.org/ws/2/release/{REL}": {"title": "Album", "release-group": {"id": RG}, "media": [{"track-count": 1}] * 2},
         f"https://coverartarchive.org/release/{REL}": {"images": [
-            {"id": 1, "front": True, "types": ["Front"], "image": "https://caa/f.jpg", "thumbnails": {"250": "https://caa/f.jpg"}},
-            {"id": 2, "back": True, "types": ["Back"], "image": "https://caa/b.jpg", "thumbnails": {"250": "https://caa/b.jpg"}},
-            {"id": 3, "types": ["Medium"], "comment": "Disc 2", "image": "https://caa/d2.jpg", "thumbnails": {"250": "https://caa/d2.jpg"}},
+            img(1, "Front", "https://caa/f.jpg", front=True), img(2, "Back", "https://caa/b.jpg", back=True),
+            img(3, "Medium", "https://caa/d2.jpg", comment="Disc 2"), img(4, "Booklet", "https://caa/p1.jpg"), img(5, "Booklet", "https://caa/p2.jpg"),
         ]},
         f"https://coverartarchive.org/release-group/{RG}": 404,
         "https://caa/f.jpg": A, "https://caa/b.jpg": make_image("c", 1000, w=1000, h=900), "https://caa/d2.jpg": make_image("b", 700),
+        "https://caa/p1.jpg": make_image("b", 800, w=1200, h=600), "https://caa/p2.jpg": make_image("c", 800, w=1200, h=600),
         "https://api.deezer.com/": {"data": [{"id": 9, "title": "Album", "artist": {"name": "Artist"}, "cover_xl": "https://dz/x.jpg", "cover_medium": "https://dz/x.jpg"}]},
         "https://dz/x.jpg": A,
     }
@@ -53,46 +54,90 @@ def state(picard_env, monkeypatch):
     return glue.STATE
 
 
-def test_review_dialog_searches_preselects_and_builds_plan(picard_env, state):
-    from coverup.model import ArtType
+def open_dialog(picard_env, state):
     from coverup.ui.review_dialog import ReviewDialog
 
-    album, _files = build_album(picard_env)
+    album, files = build_album(picard_env)
     dlg = ReviewDialog(album, None, state)
     assert wait_until(lambda: dlg.result is not None), "search did not finish"
-    assert dlg.apply_btn.isEnabled()
-    front = dlg.grids["front"].selected()
-    assert front and front[0].provider == "caa"
-    assert dlg.grids["front"].count() == 2  # caa + deezer
-    assert dlg.disc_combo.count() == 2
-    dlg.type_checks["back"].setChecked(True)
-    dlg.type_checks["disc"].setChecked(True)
+    return dlg, album, files
+
+
+def slot(dlg, key):
+    return next(s for s in dlg.slots if s.key == key)
+
+
+def test_dialog_builds_one_tab_per_slot_and_preselects_the_set(picard_env, state):
+    from coverup.model import ArtType
+
+    dlg, _album, _ = open_dialog(picard_env, state)
+    tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
+    assert tabs == ["Front (2)", "Back (1)", "Disc 1", "Disc 2 (1)", "Booklet (2)", "Artist", "Create"]
+    assert slot(dlg, "front").chosen[0].provider == "caa"
+    assert slot(dlg, "disc1").chosen == [] and not slot(dlg, "disc1").include.isEnabled()
+    assert slot(dlg, "disc1").stack.currentIndex() == 1  # empty state with directions
     items = dlg.chosen_items()
-    kinds = [(i.art_type, i.disc_number) for i in items]
-    assert (ArtType.FRONT, None) in kinds and (ArtType.BACK, None) in kinds and (ArtType.DISC, 2) in kinds
-    assert dlg.s.with_(**dlg._folder_settings())["folder_name"] == "covers"
-    dlg.folder_combo.setCurrentText("artwork")
-    assert dlg._folder_settings() == {"folder_mode": "subfolder", "folder_name": "artwork"}
-    dlg.folder_combo.setCurrentText("Custom…")
-    dlg.custom_folder.setText("bad/name")
-    with pytest.raises(ValueError):
-        dlg._folder_settings()
+    kinds = sorted((i.art_type.value, i.disc_number or 0, i.page or 0) for i in items)
+    assert kinds == [("back", 0, 0), ("booklet", 0, 1), ("booklet", 0, 2), ("disc", 2, 0), ("front", 0, 0)]
+    assert dlg.apply_btn.text() == "Apply 5 images" and dlg.apply_btn.isEnabled()
+    assert "Embeds the front image in the tags" in dlg.summary.text() and "covers/" in dlg.summary.text()
+    assert dlg.preview.title.text() == "Cover Art Archive"
+    assert "exact release" in dlg.status.text()
+    # untick the booklet: two fewer images
+    slot(dlg, "booklet").include.setChecked(False)
+    assert dlg.apply_btn.text() == "Apply 3 images"
+    assert all(i.art_type != ArtType.BOOKLET for i in dlg.chosen_items())
     dlg.reject()
 
 
-def test_review_dialog_generates_offline_art(picard_env, state):
-    from coverup.ui.review_dialog import ReviewDialog
+def test_dialog_destination_controls(picard_env, state):
+    from coverup.ui.review_dialog import NO_FILES, OTHER_FOLDER
 
-    album, _ = build_album(picard_env)
+    dlg, _a, _ = open_dialog(picard_env, state)
+    dlg.folder_combo.setCurrentIndex(dlg.folder_combo.findData("artwork"))
+    assert dlg._destination()["folder_name"] == "artwork"
+    dlg.folder_combo.setCurrentIndex(dlg.folder_combo.findData(OTHER_FOLDER))
+    dlg.custom_folder.setText("bad/name")
+    assert not dlg.apply_btn.isEnabled() and "valid folder name" in dlg.summary.text()
+    dlg.custom_folder.setText("My Scans")
+    assert dlg._destination()["folder_name"] == "My Scans" and dlg.apply_btn.isEnabled()
+    dlg.folder_combo.setCurrentIndex(dlg.folder_combo.findData(NO_FILES))
+    dlg.embed_combo.setCurrentIndex(dlg.embed_combo.findData([]))
+    assert not dlg.apply_btn.isEnabled() and "choose where" in dlg.summary.text()
+    dlg.reject()
+
+
+def test_dialog_apply_embeds_front_only_and_saves_the_rest(picard_env, state):
+    import os
+
+    from coverup import glue
+
+    dlg, album, files = open_dialog(picard_env, state)
+    glue.STATE.pending.clear()
+    dlg._apply()
+    assert wait_until(lambda: bool(glue.STATE.pending), 20), "apply did not finish"
+    embedded = {tuple(i.types) for i in album.metadata.images}
+    assert embedded == {("front",)}  # collector default: only the front goes into the tags
+    glue.on_file_saved(None, files[1])
+    cd2 = os.path.dirname(files[1].filename)
+    names = sorted(os.listdir(os.path.join(cd2, "covers")))
+    assert {"cover.jpg", "back.jpg", "disc2.jpg", "booklet-01.jpg", "booklet-02.jpg"} <= set(names)
+    assert os.path.exists(os.path.join(cd2, "cover.jpg"))
+
+
+def test_dialog_create_and_use_as_front(picard_env, state):
+    dlg, _a, _ = open_dialog(picard_env, state)
     state.api.plugin_config["ai_size"] = 256
-    dlg = ReviewDialog(album, None, state)
-    assert wait_until(lambda: dlg.result is not None)
+    dlg.s = state.settings()
     dlg.var_spin.setValue(2)
     dlg._generate()
-    assert wait_until(lambda: dlg.creative_grid.count() == 2), "generation did not finish"
-    dlg.use_generated.setChecked(True)
-    front = [i for i in dlg.chosen_items() if i.art_type.value == "front"][0]
-    assert front.candidate.generated and front.candidate.comment.startswith("Generated by CoverUp")
+    assert wait_until(lambda: dlg.creative_grid.count() == 2), "creating did not finish"
+    assert dlg.use_btn.isEnabled()
+    dlg._use_generated()
+    front = slot(dlg, "front")
+    assert front.chosen[0].generated and dlg.tabs.currentIndex() == 0
+    item = [i for i in dlg.chosen_items() if i.art_type.value == "front"][0]
+    assert item.candidate.comment.startswith("Generated by CoverUp")
     dlg.reject()
 
 
@@ -103,33 +148,49 @@ def test_batch_dialog_auto_applies(picard_env, state):
     dlg = BatchDialog([album], None, state)
     assert wait_until(lambda: not dlg.stop.isEnabled(), 30)
     assert dlg.table.item(0, 1).text().startswith("✔"), dlg.table.item(0, 2).text()
-    assert any(i.is_front_image() for i in album.metadata.images)
+    assert {tuple(i.types) for i in album.metadata.images} == {("front",)}
     dlg.close()
 
 
-def test_options_page_round_trip(picard_env, monkeypatch):
+def test_options_page_round_trip_and_restore_defaults(picard_env, monkeypatch):
     from unittest.mock import MagicMock, patch
 
     import coverup
-    from coverup.ui.options_page import _make_options_page_class
+    from coverup.ui.options_page import NO_FILES, OTHER_FOLDER, _make_options_page_class
     from picard.plugin3.api import OptionsPage
 
     monkeypatch.setattr(coverup, "reconfigure_logging", lambda: None)
     with patch("picard.ui.options.tagger_instance", return_value=MagicMock()):
         cls = _make_options_page_class(OptionsPage)
-        cls.api = FakeApi(folder_name="artwork", log_max_mb=5, creative_triggers=["no_cover"], creative_method_order=["ai", "template"])
+        cls.api = FakeApi(folder_name="artwork", log_max_mb=5, creative_triggers=["no_cover"], creative_method_order=["ai", "template"],
+                          prefer_largest=False, embed_types=["front", "back"])
         page = cls()
     page.load()
-    kind, w = page.widgets["folder_name"]
-    assert w.text() == "artwork"
-    assert page.widgets["log_max_mb"][1].value() == 5
-    assert page.widgets["creative_method_order"][1].currentData() == "ai,template"
-    w.setText("../bad")
-    page.widgets["log_mode"][1].setCurrentIndex(page.widgets["log_mode"][1].findData("age"))
+    w = page.widgets
+    assert w["folder"][1].combo.currentData() == "artwork"
+    assert w["log_max_mb"][1].value() == 5
+    assert w["creative_method_order"][1].currentData() == "ai,template"
+    assert w["prefer_largest"][1].value() is False and w["target_size"][1].isEnabled()
+    assert w["embed_types"][1].currentData() == ["front", "back"]
+    assert w["embed_max_side"][1].specialValueText() == "Full size"
+    # custom names are read-only unless the Custom preset is chosen
+    assert not w["name_front"][1].isEnabled()
+    w["folder"][1].combo.setCurrentIndex(w["folder"][1].combo.findData(OTHER_FOLDER))
+    w["folder"][1].edit.setText("../bad")
+    w["log_mode"][1].setCurrentIndex(w["log_mode"][1].findData("age"))
+    w["embed_types"][1].setCurrentIndex(w["embed_types"][1].findData([]))
     page.provider_list.item(0).setCheckState(page.provider_list.item(0).checkState().__class__.Unchecked)
     page.save()
     cfg = cls.api.plugin_config
-    assert cfg["folder_name"] == "covers"  # invalid name reset to the default
-    assert cfg["log_mode"] == "age" and cfg["log_max_mb"] == 5
+    assert cfg["folder_name"] == "covers"  # an invalid name falls back to the default
+    assert cfg["log_mode"] == "age" and cfg["log_max_mb"] == 5 and cfg["prefer_largest"] is False
+    assert cfg["embed"] is False
     assert cfg["creative_triggers"] == ["no_cover"] and cfg["creative_method_order"] == ["ai", "template"]
     assert "caa" not in cfg["providers_enabled"] and cfg["provider_order"][0] == "caa"
+    # Restore defaults shows the collector defaults without storing them
+    page.restore_defaults()
+    assert w["prefer_largest"][1].value() is True and w["embed_types"][1].currentData() == ["front"]
+    assert w["folder"][1].combo.currentData() == "covers" and cfg["log_mode"] == "age"
+    w["folder"][1].combo.setCurrentIndex(w["folder"][1].combo.findData(NO_FILES))
+    page.save()
+    assert cfg["save_files"] is False

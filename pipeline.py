@@ -109,6 +109,7 @@ class Pipeline:
         t0 = time.monotonic()
         log.info("Searching artwork for %s (release %s)", q.label_text, q.release_mbid or "-")
         enrich_query(self.http, q)
+        self._format = q.format or ""
         res.timings["identify"] = time.monotonic() - t0
 
         t1 = time.monotonic()
@@ -235,7 +236,7 @@ class Pipeline:
     def _select(self, cands: list[Candidate], art: ArtType) -> Selection:
         valid = [c for c in cands if c.rejected_reason != "Not a valid image"]
         sel = select_best(
-            valid, art, limits_from_settings(self.s, art),
+            valid, art, limits_from_settings(self.s, art, getattr(self, "_format", "")),
             hamming_threshold=int(self.s["hamming_threshold"]), conflict_min_sources=int(self.s["conflict_min_sources"]),
         )
         for c in sel.rejected:

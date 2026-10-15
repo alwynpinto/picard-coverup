@@ -2,7 +2,7 @@
 
 Find, compare and apply album artwork from many sources, as embedded tags, as files in a folder you name, or both.
 
-**Version 0.2.1. Needs Picard 3.0 or newer.**
+**Version 0.3.0. Needs Picard 3.0 or newer.**
 
 ## What it does
 
@@ -10,7 +10,7 @@ Right-click an album (or a cluster, track or file) in Picard:
 
 | Menu item | What happens |
 |---|---|
-| **CoverUp: Find artwork…** | Searches every enabled source, shows the candidates per art type with CoverUp's pick highlighted, and applies what you choose. |
+| **CoverUp: Find artwork…** | Searches every enabled source and opens the review window: one tab per art type (Front, Back, each disc, Booklet, Artist, Create), a large preview with a comparison to your current cover, and **Your set**, the strip of everything you are about to apply. |
 | **CoverUp: Auto-apply** | For all selected albums: applies confident results, marks conflicts and misses for review (double-click a row to review it). |
 | **CoverUp: Undo last apply** | Removes the files the last apply wrote and restores any files it replaced (from `.coverup-backup`). |
 
@@ -23,13 +23,23 @@ Cover Art Archive (exact release and release group), Discogs (exact release via 
 3. Otherwise the image that the **most independent sources agree on** visually (perceptual hashing).
 4. If exact-release art and a large group of other sources disagree, nothing is applied automatically; the album is flagged for review.
 
-Hover any thumbnail for its score breakdown and why it was or wasn't chosen.
+Each image carries a plain label: **Exact release**, **Same album** (possibly another edition), **Search match**, or **Generated**. CoverUp's choice is marked **CoverUp pick**. Select an image to see why in the preview panel.
 
 ### Art types
 Front, back, disc (matched to the right disc using `discnumber` tags), booklet pages, and artist images (photo, logo, background, banner). Choose any combination per run; set the default in Options.
 
+### Defaults (chosen for collectors)
+- Collects the front, back, disc art and booklet pages; artist images are one tick away.
+- Embeds **only the front cover** in the tags (up to 1200 px) and saves every image as a full-size file in `covers/`, plus `cover.jpg` beside the tracks for players and media servers.
+- Prefers the **largest** scan available; never applies anything smaller than 600 px; never enlarges images.
+- Replaces an existing file only when the new image is larger, and keeps a backup so Undo can restore it.
+- Records where each image came from in `coverup.json`, not in your tags.
+- Creating covers is off until you turn it on.
+
+If you used an earlier version, settings you never changed move to these defaults; anything you changed yourself is kept. *Restore Defaults* in the Options window shows them again.
+
 ### Output
-- **Embed in tags** (resized to a maximum you set, default 1200 px). Disc art is embedded only into that disc's files.
+- **Embed in tags**: front only (default), front and back, everything chosen, or nothing. Disc art is embedded only into that disc's files.
 - **Save as files** in a sub-folder you name: `covers` (default), `art`, `artwork`, `booklet` or your own, or in the album folder itself. By default the front cover is also saved as `cover.jpg` in the album folder, where players look for it.
 - File names: default, Kodi/Jellyfin, Plex presets, or your own templates (`disc{discnumber}`, `booklet-{n}`).
 - Artist images go to the artist folder (the folder above the album; `Album/CD1` layouts are recognised).

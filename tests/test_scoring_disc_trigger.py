@@ -123,3 +123,39 @@ def test_always_generate_works_even_with_real_art_but_only_for_enabled_types():
 def test_combined_triggers():
     cfg = CreativeSettings(triggers=Trigger.NO_COVER | Trigger.LOW_CONFIDENCE)
     assert should_generate(Situation(ArtType.FRONT, found=True, conflict_or_tier_c_only=True), cfg)[0]
+
+
+# ---- settings migration ------------------------------------------------------------------------------
+
+def test_migration_moves_untouched_defaults_and_keeps_user_choices():
+    from coverup.settings import SETTINGS_VERSION, migrate
+
+    old_user = {"settings_version": 0, "apply_types": ["front"], "prefer_largest": False, "apply_min_side": 450,
+                "jpeg_quality": 92, "record_source_in_comment": True}
+    changed = migrate(old_user)
+    assert old_user["apply_types"] == ["front", "back", "disc", "booklet"] and old_user["prefer_largest"] is True
+    assert old_user["apply_min_side"] == 450  # the user's own value is kept
+    assert set(changed) == {"apply_types", "prefer_largest", "jpeg_quality", "record_source_in_comment", "min_back", "min_disc", "min_booklet", "min_artist"}
+    assert old_user["settings_version"] == SETTINGS_VERSION
+    again = dict(old_user, prefer_largest=False)
+    assert migrate(again) == [] and again["prefer_largest"] is False  # runs once only
+
+
+def test_embed_types():
+    from coverup.settings import Settings
+
+    assert Settings.from_mapping({}).embed_art_types() == {ArtType.FRONT}
+    assert Settings.from_mapping({"embed_types": ["front", "disc"]}).embed_art_types() == {ArtType.FRONT, ArtType.DISC}
+
+
+def test_cassette_and_dvd_fronts_are_not_rejected_as_non_square():
+    from coverup.matching.scoring import limits_from_settings
+    from coverup.settings import Settings
+
+    s = Settings.from_mapping({})
+    jcard = Candidate("caa", "1", "u", ArtType.FRONT, Tier.A, 640, 1000, 1)
+    assert "Aspect" in (check_limits(jcard, limits_from_settings(s, ArtType.FRONT, "CD")) or "")
+    assert check_limits(jcard, limits_from_settings(s, ArtType.FRONT, "Cassette")) is None
+    assert check_limits(jcard, limits_from_settings(s, ArtType.FRONT, "DVD-Video")) is None
+    tiny = Candidate("caa", "2", "u", ArtType.FRONT, Tier.A, 200, 320, 1)
+    assert "Too small" in check_limits(tiny, limits_from_settings(s, ArtType.FRONT, "Cassette"))

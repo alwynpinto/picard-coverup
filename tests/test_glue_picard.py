@@ -93,7 +93,7 @@ def test_embed_front_on_album_and_disc_art_only_on_its_disc(picard_env):
     album, files = build_album(picard_env)
     front = Candidate("caa", "1", "https://caa/f.jpg", ArtType.FRONT, Tier.A, data=make_image("a", 2000))
     disc2 = Candidate("fanart", "2", "https://f/d.png", ArtType.DISC, Tier.B, disc_number=2, data=make_image("b", 800, fmt="png"))
-    s = Settings.from_mapping({"embed_max_side": 1000})
+    s = Settings.from_mapping({"embed_max_side": 1000, "record_source_in_comment": True})
     glue.embed(album, [PlanItem(ArtType.FRONT, front), PlanItem(ArtType.DISC, disc2, disc_number=2)], s)
     imgs = list(album.metadata.images)
     fronts = [i for i in imgs if i.is_front_image()]

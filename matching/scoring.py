@@ -38,8 +38,21 @@ DEFAULT_LIMITS: dict[ArtType, ResolutionLimits] = {
 }
 
 
-def limits_from_settings(settings, art_type: ArtType) -> ResolutionLimits:
-    """Build search limits for one art type from a ``Settings`` object."""
+# Release formats whose front cover is not square (cassette J-cards, DVD/Blu-ray/VHS cases, ...)
+NON_SQUARE_FORMATS = ("cassette", "dvd", "blu-ray", "bluray", "vhs", "hd-dvd", "umd", "8-track", "minidisc", "betamax", "laserdisc")
+
+
+def is_non_square_format(fmt: str | None) -> bool:
+    f = (fmt or "").lower()
+    return any(k in f for k in NON_SQUARE_FORMATS)
+
+
+def limits_from_settings(settings, art_type: ArtType, release_format: str = "") -> ResolutionLimits:
+    """Build search limits for one art type from a ``Settings`` object.
+
+    For releases whose front cover is not square (cassettes, DVDs, ...), the square rule is replaced by
+    a wide aspect range and the minimum applies to the longer side, so those covers are not rejected.
+    """
     mn = settings.min_side_for(art_type)
     mx = int(settings["max_side"] or 0)
     lim = ResolutionLimits(
@@ -51,7 +64,11 @@ def limits_from_settings(settings, art_type: ArtType) -> ResolutionLimits:
         target_size=int(settings["target_size"] or 1200),
         prefer_largest=bool(settings["prefer_largest"]),
     )
-    if art_type in (ArtType.FRONT, ArtType.DISC):
+    if art_type == ArtType.FRONT and is_non_square_format(release_format):
+        lim.aspect_min, lim.aspect_max = 0.4, 1.6
+        lim.min_width = lim.min_height = 0
+        lim.min_long_side = mn
+    elif art_type in (ArtType.FRONT, ArtType.DISC):
         tol = float(settings["front_aspect_tolerance"] or 0.05)
         lim.aspect_min, lim.aspect_max = 1.0 - tol, 1.0 + tol
     elif art_type in (ArtType.BACK, ArtType.BOOKLET):

@@ -398,7 +398,8 @@ def apply_plan(target, items: list[PlanItem], s: Settings, embed_on: bool, files
     """Embed and/or schedule files for the chosen items. Returns notes for the user."""
     notes: list[str] = []
     if embed_on:
-        notes += embed(target, items, s)
+        wanted = s.embed_art_types()
+        notes += embed(target, [it for it in items if it.art_type in wanted], s)
     if files_on:
         schedule_files(target, items, s)
     front = next((it.candidate for it in items if it.art_type == ArtType.FRONT), None)
@@ -413,6 +414,11 @@ def apply_plan(target, items: list[PlanItem], s: Settings, embed_on: bool, files
 def register_options(api) -> None:
     for key, default in DEFAULTS.items():
         api.plugin_config.register_option(key, default)
+    from .settings import migrate
+
+    changed = migrate(api.plugin_config)
+    if changed:
+        log.info("Settings updated to the new defaults: %s", ", ".join(changed))
 
 
 __all__ = [

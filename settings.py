@@ -14,6 +14,30 @@ from typing import Any, Mapping
 
 from .model import ArtType
 
+SETTINGS_VERSION = 2
+
+# Defaults that changed between settings versions: (version introduced, key, old default, new default).
+# A user still on the old default gets the new one; anything they chose themselves is kept.
+CHANGED_DEFAULTS = [
+    (2, "apply_types", ["front"], ["front", "back", "disc", "booklet"]),
+    (2, "prefer_largest", False, True),
+    (2, "apply_min_side", 500, 600),
+    (2, "jpeg_quality", 92, 95),
+    (2, "record_source_in_comment", True, False),
+    (2, "min_back", 300, 500),
+    (2, "min_disc", 300, 500),
+    (2, "min_booklet", 300, 500),
+    (2, "min_artist", 300, 500),
+]
+
+# Embed choices offered in the dialog and options
+EMBED_CHOICES = [
+    (["front"], "Front cover only"),
+    (["front", "back"], "Front and back"),
+    (["front", "back", "disc", "booklet"], "Everything chosen"),
+    ([], "Nothing (files only)"),
+]
+
 # Provider ids, in default query order
 PROVIDERS = ("caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "lastfm", "websearch", "local")
 
@@ -22,7 +46,7 @@ PROVIDER_LABELS = {
     "discogs": "Discogs",
     "fanart": "Fanart.tv",
     "audiodb": "TheAudioDB",
-    "itunes": "iTunes / Apple Music",
+    "itunes": "Apple Music (iTunes)",
     "deezer": "Deezer",
     "lastfm": "Last.fm",
     "websearch": "Web image search (your own API key)",
@@ -59,25 +83,26 @@ DEFAULTS: dict[str, Any] = {
     "conflict_min_sources": 3,
     "auto_apply_mode": "confident",  # confident | never
     # ---- art types ----
-    "apply_types": ["front"],  # default selection in the dialog / for auto-apply
+    "apply_types": ["front", "back", "disc", "booklet"],  # collected by default (dialog and auto-apply)
     # ---- resolution (search limits, per type) ----
     "min_front": 500,
-    "min_back": 300,
-    "min_disc": 300,
-    "min_booklet": 300,
-    "min_artist": 300,
+    "min_back": 500,
+    "min_disc": 500,
+    "min_booklet": 500,
+    "min_artist": 500,
     "max_side": 0,  # 0 = no maximum
     "target_size": 1200,
-    "prefer_largest": False,
+    "prefer_largest": True,  # collectors want the best scan available
     "front_aspect_tolerance": 0.05,
     "max_file_mb": 25,
     # ---- resolution (apply limits) ----
-    "apply_min_side": 500,  # below this, art is not applied (and can trigger the creative fallback)
+    "apply_min_side": 600,  # below this, art is not applied (and can trigger the creative fallback)
     "embed_max_side": 1200,
     "file_max_side": 0,  # 0 = keep original size
     "upscale_to_minimum": False,
     # ---- output ----
     "embed": True,
+    "embed_types": ["front"],  # which chosen types go into tags; the rest are saved as files only
     "save_files": True,
     "folder_mode": "subfolder",  # same | subfolder
     "folder_name": "covers",
@@ -93,13 +118,13 @@ DEFAULTS: dict[str, Any] = {
     "name_artist_banner": "banner",
     "save_artist_art": True,  # write artist images into the artist folder (parent of the album folder)
     "file_format": "original",  # original | jpeg | png
-    "jpeg_quality": 92,
+    "jpeg_quality": 95,
     "collision_policy": "if_better",  # skip | overwrite | if_better | keep_both
     "backups": True,
     "write_files_when": "on_save",  # on_save | immediately
     "multi_folder": "every",  # every | first   (albums whose discs are in separate folders)
     "replace_embedded": True,  # remove existing embedded images of the applied types first
-    "record_source_in_comment": True,
+    "record_source_in_comment": False,  # provenance goes to coverup.json, keeping tags clean
     "write_sidecar": True,  # coverup.json next to written files
     # ---- creative / AI ----
     "creative_triggers": [],  # any of: no_cover, below_min, low_confidence
@@ -134,6 +159,7 @@ DEFAULTS: dict[str, Any] = {
     "log_level": "INFO",
     "log_anonymise": False,
     "log_folder": "",  # empty = default under Picard's cache folder
+    "settings_version": 0,
 }
 
 NAMING_PRESETS: dict[str, dict[str, str]] = {
@@ -246,6 +272,12 @@ class Settings:
             out.update(TYPE_GROUPS.get(group, ()))
         return out
 
+    def embed_art_types(self) -> set[ArtType]:
+        out: set[ArtType] = set()
+        for group in self.values.get("embed_types") or []:
+            out.update(TYPE_GROUPS.get(group, ()))
+        return out
+
     def min_side_for(self, art_type: ArtType) -> int:
         if art_type == ArtType.FRONT:
             return int(self.values["min_front"])
@@ -285,3 +317,23 @@ def _json_dict(value: Any) -> dict:
         return d if isinstance(d, dict) else {}
     except (TypeError, ValueError):
         return {}
+
+
+def migrate(config) -> list[str]:
+    """Bring a stored plugin config up to SETTINGS_VERSION. Returns the keys that changed."""
+    try:
+        version = int(config["settings_version"] or 0)
+    except (KeyError, TypeError, ValueError):
+        version = 0
+    changed = []
+    for introduced, key, old, new in CHANGED_DEFAULTS:
+        if version < introduced:
+            try:
+                current = config[key]
+            except KeyError:
+                current = old
+            if current == old or (isinstance(old, list) and list(current or []) == old):
+                config[key] = new
+                changed.append(key)
+    config["settings_version"] = SETTINGS_VERSION
+    return changed
