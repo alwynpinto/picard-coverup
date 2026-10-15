@@ -2,7 +2,7 @@
 
 Find, compare and apply album artwork from many sources, as embedded tags, as files in a folder you name, or both.
 
-**Version 0.3.0. Needs Picard 3.0 or newer.**
+**Version 0.3.1. Needs Picard 3.0 or newer.**
 
 ## What it does
 
@@ -15,7 +15,10 @@ Right-click an album (or a cluster, track or file) in Picard:
 | **CoverUp: Undo last apply** | Removes the files the last apply wrote and restores any files it replaced (from `.coverup-backup`). |
 
 ### Sources
-Cover Art Archive (exact release and release group), Discogs (exact release via the MusicBrainz link, barcode, catalogue number or search), Fanart.tv (covers, numbered disc art, artist images and logos), TheAudioDB, iTunes, Deezer, Last.fm, web image search with **your own** Brave or Google API key (pages are never scraped), and images already in the album folder.
+Cover Art Archive (exact release and release group), Discogs (exact release via the MusicBrainz link, barcode, catalogue number or search), Fanart.tv (covers, numbered disc art, artist images and logos), TheAudioDB, iTunes, Deezer, Last.fm, optional paid web image search (Brave API key), and images already in the album folder.
+
+### Search the web yourself (free)
+**Search the web** in the review window opens an image search in your browser (Google Images limited to large images, Bing, DuckDuckGo, Discogs, or the release's MusicBrainz cover art page), built from the album artist, album title, year, edition words such as *remastered* or *deluxe* from the title and release comment, and, for "this pressing", the label, catalogue number and format. Open a picture full size, then copy it (right-click > Copy image) and press **Ctrl+V** in CoverUp, or drag it onto the window: it lands in the tab you are on. Pasted Google/Bing result links are turned into the real image address. CoverUp never reads search-engine pages itself.
 
 ### How the pick is made
 1. **Exact release** art (tier A: Cover Art Archive release images, or the matching Discogs release) wins.

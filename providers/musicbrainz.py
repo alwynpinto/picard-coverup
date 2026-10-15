@@ -76,6 +76,8 @@ def apply_release_json(q: Query, rel: dict) -> None:
             q.year = int(rel["date"][:4])
         except ValueError:
             pass
+    if not q.comment and rel.get("disambiguation"):
+        q.comment = rel["disambiguation"]
     if not q.country and rel.get("country"):
         q.country = rel["country"]
     log.info(

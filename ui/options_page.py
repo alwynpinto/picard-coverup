@@ -80,9 +80,9 @@ LAYOUT: dict[str, list[tuple]] = {
         ("fanart_client_key", "Fanart.tv personal key", "password", None, "Optional. New uploads appear sooner."),
         ("audiodb_api_key", "TheAudioDB key", "text", None, "123 is the free public key. A personal key is faster."),
         ("lastfm_api_key", "Last.fm key", "password", None, "Optional. Last.fm images are usually small."),
-        (H, "Web image search"),
+        (H, "Web image search (optional, paid)"),
         ("websearch_engine", "Service", "radio", C(("brave", "Brave Search API"), ("google", "Google Programmable Search")), None),
-        ("websearch_api_key", "API key", "password", None, "Your own key. CoverUp uses the official API and never scrapes search pages."),
+        ("websearch_api_key", "API key", "password", None, "Brave charges per search (no free plan since May 2026); Google no longer takes new customers. Not needed: the review window's Search the web button opens Google Images in your browser for free."),
         ("websearch_google_cx", "Google engine ID", "text", None, None),
     ],
     "Image quality": [

@@ -49,7 +49,7 @@ PROVIDER_LABELS = {
     "itunes": "Apple Music (iTunes)",
     "deezer": "Deezer",
     "lastfm": "Last.fm",
-    "websearch": "Web image search (your own API key)",
+    "websearch": "Web image search (paid API key)",
     "local": "Local files in the album folder",
 }
 

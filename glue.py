@@ -172,6 +172,7 @@ def query_from(target) -> Query:
         rg_mbid=md.get("musicbrainz_releasegroupid") or "",
         artist_mbid=(md.getall("musicbrainz_albumartistid") or [""])[0] if hasattr(md, "getall") else md.get("musicbrainz_albumartistid", ""),
         genre=(md.get("genre") or "").split(";")[0].strip(),
+        comment=md.get("~releasecomment") or "",
         track_count=_int(md.get("~totalalbumtracks") or md.get("totaltracks"), 0) or len(getattr(target, "tracks", []) or files),
         album_dirs=dirs,
     )

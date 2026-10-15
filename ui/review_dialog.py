@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import logging
 import threading
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
+from PyQt6.QtCore import QSize, Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -29,6 +31,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -46,6 +49,7 @@ from ..creative.template_engine import CUSTOM, load_templates
 from ..imageinfo import probe
 from ..model import ArtType, Candidate, Tier
 from ..pipeline import AlbumResult, PlanItem
+from ..searchlinks import links, search_terms, unwrap_image_url
 from ..settings import ARTIST_TYPES, EMBED_CHOICES
 from .widgets import SOURCE_NAMES, CandidateGrid, Preview, image_of, run_in_background
 
@@ -135,14 +139,27 @@ class ReviewDialog(QDialog):
         self.show_rejected.toggled.connect(lambda _on: self._refresh_all())
         tools.addWidget(self.show_rejected)
         tools.addStretch(1)
+        self.search_btn = QPushButton("Search the web")
+        self.search_btn.setMenu(self._build_search_menu())
+        self.search_btn.setToolTip(
+            "Opens an image search in your browser, built from this album's tags.\n"
+            "Open the picture full size, then copy it (or drag it) into this window."
+        )
+        self.paste_btn = QPushButton("Paste image")
+        self.paste_btn.setToolTip("Adds a copied image, image address or file to the current tab (Ctrl+V)")
+        self.paste_btn.clicked.connect(self._paste)
         self.add_file_btn = QPushButton("Add from file…")
         self.add_file_btn.clicked.connect(self._add_file)
         self.add_url_btn = QPushButton("Add from web address…")
         self.add_url_btn.clicked.connect(self._add_url)
         self.clear_btn = QPushButton("Choose nothing here")
         self.clear_btn.clicked.connect(self._clear_choice)
-        for b in (self.add_file_btn, self.add_url_btn, self.clear_btn):
+        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.clear_btn):
             tools.addWidget(b)
+        paste = QShortcut(QKeySequence(QKeySequence.StandardKey.Paste), self.tabs)
+        paste.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        paste.activated.connect(self._paste)
+        self.setAcceptDrops(True)
         left.addLayout(tools)
         body.addLayout(left, 1)
         self.preview = Preview()
@@ -540,7 +557,7 @@ class ReviewDialog(QDialog):
 
     def _tab_changed(self, _idx: int) -> None:
         slot = self._current_slot()
-        for b in (self.add_file_btn, self.add_url_btn, self.clear_btn, self.show_rejected):
+        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.clear_btn, self.show_rejected):
             b.setVisible(slot is not None)
         if slot is None:
             sel = self.creative_grid.selected()
@@ -681,15 +698,107 @@ class ReviewDialog(QDialog):
         if not url.startswith(("http://", "https://")):
             QMessageBox.warning(self, "CoverUp", "The address must start with http:// or https://.")
             return
+        self._download(url)
+
+    def _download(self, url: str) -> None:
+        url = unwrap_image_url(url)
         http = self.pipeline.http
 
         def done(data, err):
             if err:
                 QMessageBox.warning(self, "CoverUp", f"Could not download the image: {err}")
+            elif not imaging.is_valid_image(data):
+                QMessageBox.warning(
+                    self, "CoverUp",
+                    "That address is a web page, not an image. In the browser, open the picture full size and "
+                    "copy the image itself (right-click > Copy image), then paste it here.",
+                )
             else:
                 self._manual(data, url, url)
 
         run_in_background(lambda: http.get(url, cache=False).data, done)
+
+    # ---- web search (in the user's browser) and bringing pictures back ------------------------
+    def _build_search_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        # rebuilt each time it opens: the search fills in label, catalogue number and Discogs id
+        menu.aboutToShow.connect(lambda: self._fill_search_menu(menu))
+        self._fill_search_menu(menu)
+        return menu
+
+    def _fill_search_menu(self, menu: QMenu) -> None:
+        menu.clear()
+        for label, url in links(self.query):
+            act = menu.addAction(label)
+            act.setToolTip(url)
+            act.triggered.connect(lambda _checked=False, u=url: self._open_search(u))
+        menu.addSeparator()
+        menu.addAction("Edit the search words…").triggered.connect(self._edit_search)
+
+    def _open_search(self, url: str) -> None:
+        log.info("Opening web search: %s", url)
+        QDesktopServices.openUrl(QUrl(url))
+        self.status.setText(
+            "Search opened in your browser. Open a picture full size, then copy it (right-click > Copy image) "
+            "and press Ctrl+V here, or drag it onto this window."
+        )
+
+    def _edit_search(self) -> None:
+        text, ok = QInputDialog.getText(self, "Search the web", "Search Google Images (large) for:", text=search_terms(self.query, precise=True))
+        if ok and text.strip():
+            self._open_search("https://www.google.com/search?tbm=isch&tbs=isz:l&q=" + urllib.parse.quote_plus(text.strip()))
+
+    def _paste(self) -> None:
+        mime = QApplication.clipboard().mimeData()
+        if not self._import_mime(mime):
+            QMessageBox.information(self, "CoverUp", "The clipboard has no image, image address or image file to add.")
+
+    def _import_mime(self, mime) -> bool:
+        """Add an image from clipboard or drag-and-drop data. Returns False if there was nothing usable."""
+        if mime is None:
+            return False
+        if mime.hasUrls():
+            used = False
+            for u in mime.urls():
+                if u.isLocalFile():
+                    try:
+                        self._manual(Path(u.toLocalFile()).read_bytes(), "", Path(u.toLocalFile()).name)
+                        used = True
+                    except OSError:
+                        continue
+                elif u.scheme() in ("http", "https"):
+                    self._download(u.toString())
+                    used = True
+            if used:
+                return True
+        if mime.hasImage():
+            img = mime.imageData()
+            if isinstance(img, QImage) and not img.isNull():
+                self._manual(imaging.encode(img, "png"), "", "pasted image")
+                return True
+        if mime.hasText():
+            text = mime.text().strip()
+            if text.startswith(("http://", "https://")):
+                self._download(text.split()[0])
+                return True
+            if text.startswith("file://") or Path(text).is_file():
+                path = QUrl(text).toLocalFile() if text.startswith("file://") else text
+                try:
+                    self._manual(Path(path).read_bytes(), "", Path(path).name)
+                    return True
+                except OSError:
+                    return False
+        return False
+
+    def dragEnterEvent(self, event) -> None:
+        m = event.mimeData()
+        if m.hasImage() or m.hasUrls() or m.hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        if self._import_mime(event.mimeData()):
+            event.acceptProposedAction()
 
     # ===================================================================================== create
     def _generate(self) -> None:

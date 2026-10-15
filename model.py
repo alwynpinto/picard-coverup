@@ -49,6 +49,7 @@ class Query:
     artist_mbid: str = ""
     discogs_release_id: int | None = None
     genre: str = ""
+    comment: str = ""  # MusicBrainz release disambiguation, e.g. "2009 remaster"
     track_count: int = 0
     album_dirs: list[str] = field(default_factory=list)  # folders currently holding the album's files
 

@@ -194,3 +194,48 @@ def test_options_page_round_trip_and_restore_defaults(picard_env, monkeypatch):
     w["folder"][1].combo.setCurrentIndex(w["folder"][1].combo.findData(NO_FILES))
     page.save()
     assert cfg["save_files"] is False
+
+
+def test_search_menu_paste_and_drop(picard_env, state, monkeypatch):
+    from PyQt6.QtCore import QMimeData, QUrl
+    from PyQt6.QtGui import QDesktopServices, QImage
+    from PyQt6.QtWidgets import QApplication
+
+    dlg, _album, _ = open_dialog(picard_env, state)
+    menu = dlg.search_btn.menu()
+    menu.aboutToShow.emit()
+    labels = [a.text() for a in menu.actions() if a.text()]
+    assert labels[0] == "Google Images: large" and "Edit the search words…" in labels
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
+    menu.actions()[0].trigger()
+    assert opened and "tbm=isch" in opened[0] and "Album" in opened[0]
+    assert "Ctrl+V" in dlg.status.text()
+
+    front = slot(dlg, "front")
+    before = front.grid.count()
+    img = QImage.fromData(make_image("c", 900))
+    QApplication.clipboard().setImage(img)
+    dlg._paste()
+    assert front.grid.count() == before + 1
+    added = [c for c in front.grid.all() if c.provider == "manual"][0]
+    assert (added.width, added.height) == (900, 900)
+
+    # a Google result link dropped on the window downloads the real image
+    state.pipeline_http = None
+    http = dlg.pipeline.http
+    http.routes["https://example.com/big.jpg"] = make_image("b", 1000)
+    mime = QMimeData()
+    mime.setUrls([QUrl("https://www.google.com/imgres?imgurl=https%3A%2F%2Fexample.com%2Fbig.jpg")])
+    assert dlg._import_mime(mime)
+    assert wait_until(lambda: front.grid.count() == before + 2)
+    # a web page instead of an image is refused with a hint, not added
+    http.routes["https://example.com/page"] = b"<html>not an image</html>"
+    shown = []
+    from PyQt6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+    dlg._download("https://example.com/page")
+    assert wait_until(lambda: shown)
+    assert "web page, not an image" in shown[0] and front.grid.count() == before + 2
+    dlg.reject()
