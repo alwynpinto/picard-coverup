@@ -1,11 +1,12 @@
 import logging
-import sys
 import tomllib
-import types
 import uuid
 from pathlib import Path
 
+import pytest
+
 import coverup
+from conftest import have_picard
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,10 +28,12 @@ class FakeConfig(dict):
 
 
 class FakeApi:
+    """Records what the plugin registers, with the same method names as Picard's PluginApi."""
+
     def __init__(self):
         self.plugin_config = FakeConfig()
         self.records = []
-
+        self.registered = {}
         outer = self
 
         class L:
@@ -42,22 +45,32 @@ class FakeApi:
 
         self.logger = L()
 
+    def __getattr__(self, name):
+        if name.startswith("register_"):
+            return lambda obj, **kw: self.registered.setdefault(name, []).append(obj)
+        raise AttributeError(name)
 
-def test_enable_sets_up_logging_and_disable_closes_it(tmp_path, monkeypatch):
-    appdirs = types.ModuleType("picard.const.appdirs")
-    appdirs.cache_folder = lambda: str(tmp_path)
-    const = types.ModuleType("picard.const")
-    const.appdirs = appdirs
-    monkeypatch.setitem(sys.modules, "picard", types.ModuleType("picard"))
-    monkeypatch.setitem(sys.modules, "picard.const", const)
-    monkeypatch.setitem(sys.modules, "picard.const.appdirs", appdirs)
+
+@pytest.mark.skipif(not have_picard(), reason="set PICARD_SRC to a Picard 3 source tree to run")
+def test_enable_registers_everything_and_logs(tmp_path, monkeypatch, qapp):
+    monkeypatch.setenv("PICARD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PICARD_CONFIG_DIR", str(tmp_path / "config"))
+    from coverup import glue
 
     api = FakeApi()
     coverup.enable(api)
-    assert api.plugin_config["log_mode"] == "fixed" and api.plugin_config["log_max_mb"] == 2
-    logging.getLogger("coverup").warning("forward me")
-    coverup.disable()
-    log_file = tmp_path / "coverup" / "logs" / "coverup.log"
-    assert "CoverUp 0.1.0 starting" in log_file.read_text(encoding="utf-8")
+    try:
+        reg = api.registered
+        assert {a.TITLE for a in reg["register_album_action"]} == {"CoverUp: Find artwork…", "CoverUp: Auto-apply", "CoverUp: Undo last apply"}
+        assert len(reg["register_cluster_action"]) == 3
+        assert reg["register_file_post_save_processor"] == [glue.on_file_saved]
+        assert reg["register_options_page"][0].NAME == "coverup"
+        assert {"_coverup_status", "_coverup_generated"} <= set(reg["register_script_variable"])
+        assert api.plugin_config["log_mode"] == "fixed" and api.plugin_config["log_max_mb"] == 2
+        assert api.plugin_config["folder_name"] == "covers"
+        logging.getLogger("coverup").warning("forward me")
+    finally:
+        coverup.disable()
+    log_file = tmp_path / "cache" / "coverup" / "logs" / "coverup.log"
+    assert "CoverUp 0.2.0 starting" in log_file.read_text(encoding="utf-8")
     assert ("warning", "CoverUp: forward me") in api.records
-    assert coverup._log_handle is None

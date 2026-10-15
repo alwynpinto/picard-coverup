@@ -1,0 +1,6 @@
+line-length = 140
+[lint]
+select = ["F", "E9", "B"]
+ignore = ["B008", "B905"]
+[lint.per-file-ignores]
+"tests/test_ui.py" = ["F811", "E402"]

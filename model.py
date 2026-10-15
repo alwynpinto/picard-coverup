@@ -48,6 +48,13 @@ class Query:
     rg_mbid: str = ""
     artist_mbid: str = ""
     discogs_release_id: int | None = None
+    genre: str = ""
+    track_count: int = 0
+    album_dirs: list[str] = field(default_factory=list)  # folders currently holding the album's files
+
+    @property
+    def label_text(self) -> str:
+        return f"{self.artist} - {self.album}" + (f" ({self.year})" if self.year else "")
 
 
 @dataclass
@@ -68,6 +75,13 @@ class Candidate:
     attribution: str = ""
     comment: str = ""
     generated: bool = False
+    thumb_url: str = ""  # small preview used for hashing and the dialog
+    thumb_data: bytes | None = field(default=None, repr=False)
+    data: bytes | None = field(default=None, repr=False)  # full image, fetched lazily
+    dims_known: bool = False  # True when width/height are reported by the source or measured
+    likes: int = 0
+    page: int = 0  # booklet page order
+    extra: dict = field(default_factory=dict)  # generation provenance etc.
     # filled by the pipeline
     score: float = 0.0
     breakdown: dict[str, float] = field(default_factory=dict)

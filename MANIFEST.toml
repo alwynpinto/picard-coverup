@@ -7,7 +7,7 @@ matches the exact release first, falls back to visual consensus across sources, 
 choose which art types (front, back, disc, booklet, artist) to apply, as embedded tags,
 as files in a folder you name, or both. Includes logging for troubleshooting.
 
-Status: early development. See the project README.
+Right-click an album: "CoverUp: Find artwork…", "CoverUp: Auto-apply", "CoverUp: Undo last apply".
 """
 api = ["3.0"]
 authors = ["herculepirate"]

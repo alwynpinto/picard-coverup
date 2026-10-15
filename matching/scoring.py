@@ -25,6 +25,7 @@ class ResolutionLimits:
     max_bytes: int = 0
     aspect_min: float = 0.0  # 0 = no limit
     aspect_max: float = 0.0
+    min_long_side: int = 0  # minimum for the longer side (used for back covers and scans)
     target_size: int = 1200  # preferred longest side for the "closest to target" preference
     prefer_largest: bool = False
 
@@ -37,6 +38,30 @@ DEFAULT_LIMITS: dict[ArtType, ResolutionLimits] = {
 }
 
 
+def limits_from_settings(settings, art_type: ArtType) -> ResolutionLimits:
+    """Build search limits for one art type from a ``Settings`` object."""
+    mn = settings.min_side_for(art_type)
+    mx = int(settings["max_side"] or 0)
+    lim = ResolutionLimits(
+        min_width=mn,
+        min_height=mn if art_type in (ArtType.FRONT, ArtType.DISC, ArtType.ARTIST_THUMB) else 0,
+        max_width=mx,
+        max_height=mx,
+        max_bytes=int(settings["max_file_mb"] or 0) * 1024 * 1024,
+        target_size=int(settings["target_size"] or 1200),
+        prefer_largest=bool(settings["prefer_largest"]),
+    )
+    if art_type in (ArtType.FRONT, ArtType.DISC):
+        tol = float(settings["front_aspect_tolerance"] or 0.05)
+        lim.aspect_min, lim.aspect_max = 1.0 - tol, 1.0 + tol
+    elif art_type in (ArtType.BACK, ArtType.BOOKLET):
+        lim.aspect_min, lim.aspect_max = 0.4, 2.5
+        # back covers and scans are often wider or taller than square: apply the minimum to the longer side
+        lim.min_width = lim.min_height = 0
+        lim.min_long_side = mn
+    return lim
+
+
 def limits_for(art_type: ArtType, overrides: dict[ArtType, ResolutionLimits] | None = None) -> ResolutionLimits:
     if overrides and art_type in overrides:
         return overrides[art_type]
@@ -44,9 +69,19 @@ def limits_for(art_type: ArtType, overrides: dict[ArtType, ResolutionLimits] | N
 
 
 def check_limits(c: Candidate, lim: ResolutionLimits) -> str | None:
-    """Return a human-readable rejection reason, or None if the candidate is eligible."""
+    """Return a human-readable rejection reason, or None if the candidate is eligible.
+
+    Candidates whose dimensions are still unknown (0x0) are not rejected on size here: the pipeline
+    measures them first, and the apply step re-checks real decoded sizes.
+    """
+    if not (c.width and c.height):
+        if lim.max_bytes and c.bytes > lim.max_bytes:
+            return f"File too large: {c.bytes} bytes > {lim.max_bytes}"
+        return None
     if lim.min_width and c.width < lim.min_width or lim.min_height and c.height < lim.min_height:
         return f"Too small: {c.width}x{c.height} < {lim.min_width}x{lim.min_height}"
+    if lim.min_long_side and max(c.width, c.height) < lim.min_long_side:
+        return f"Too small: {c.width}x{c.height}, longer side < {lim.min_long_side}"
     if lim.max_width and c.width > lim.max_width or lim.max_height and c.height > lim.max_height:
         return f"Too large: {c.width}x{c.height} > {lim.max_width}x{lim.max_height}"
     if lim.min_bytes and c.bytes and c.bytes < lim.min_bytes:
@@ -86,7 +121,7 @@ DEFAULT_RELIABILITY = {
 def _resolution_fit(c: Candidate, lim: ResolutionLimits) -> float:
     side = max(c.width, c.height)
     if side <= 0:
-        return 0.0
+        return 0.3  # size unknown
     if lim.prefer_largest:
         return min(1.0, side / 3000.0)
     target = max(1, lim.target_size)
@@ -98,7 +133,7 @@ def _resolution_fit(c: Candidate, lim: ResolutionLimits) -> float:
 
 def _aspect_fit(c: Candidate, art_type: ArtType) -> float:
     if not c.height:
-        return 0.0
+        return 0.5  # size unknown
     if art_type in (ArtType.FRONT, ArtType.DISC):
         return max(0.0, 1.0 - abs(c.aspect - 1.0) * 4.0)
     return 1.0

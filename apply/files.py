@@ -128,6 +128,7 @@ def safe_write(
     dims_of: DimsOf | None = None,
     validate: Callable[[bytes], bool] | None = None,
     backup: bool = True,
+    batch: str | None = None,
 ) -> WriteResult:
     """Write ``data`` to ``path`` atomically, honouring the collision policy.
 
@@ -188,9 +189,79 @@ def safe_write(
             "action": action,
             "path": str(target),
             "backup": str(backup_path) if backup_path else None,
+            "batch": batch,
         },
     )
     return WriteResult(action, target, backup_path)
+
+
+def _backup_copy(path: Path) -> Path:
+    root = path.parent / BACKUP_DIR_NAME
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = root / f"{stamp}-{path.name}"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = root / f"{stamp}-{n}-{path.name}"
+    shutil.copy2(path, dest)
+    return dest
+
+
+def retire(path: str | os.PathLike, backup: bool = True, batch: str | None = None) -> Path | None:
+    """Remove a file being superseded (e.g. old cover.png replaced by cover.jpg), backing it up first."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    dest = _backup_copy(p) if backup else None
+    p.unlink()
+    _journal(p.parent / BACKUP_DIR_NAME, {"ts": time.time(), "action": "removed", "path": str(p), "backup": str(dest) if dest else None, "batch": batch})
+    return dest
+
+
+def _read_journal(folder: str | os.PathLike) -> tuple[Path, list[dict]]:
+    journal = Path(folder) / BACKUP_DIR_NAME / JOURNAL_NAME
+    if not journal.exists():
+        return journal, []
+    entries = []
+    for ln in journal.read_text(encoding="utf-8").splitlines():
+        if ln.strip():
+            try:
+                entries.append(json.loads(ln))
+            except ValueError:
+                continue
+    return journal, entries
+
+
+def _undo_entry(entry: dict) -> str | None:
+    p = Path(entry["path"])
+    if entry.get("backup") and Path(entry["backup"]).exists():
+        shutil.copy2(entry["backup"], p)
+        return f"Restored {p.name} from backup"
+    if entry["action"] in ("written", "kept_both") and p.exists():
+        p.unlink()
+        return f"Removed {p.name}"
+    return None
+
+
+def last_batch(folder: str | os.PathLike) -> str | None:
+    _j, entries = _read_journal(folder)
+    for e in reversed(entries):
+        if e.get("batch"):
+            return e["batch"]
+    return None
+
+
+def undo_batch(folder: str | os.PathLike, batch: str) -> list[str]:
+    """Undo every journaled change of one apply run in ``folder`` (newest first)."""
+    journal, entries = _read_journal(folder)
+    keep, undo = [], []
+    for e in entries:
+        (undo if e.get("batch") == batch else keep).append(e)
+    done = [msg for e in reversed(undo) if (msg := _undo_entry(e))]
+    if undo:
+        journal.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in keep), encoding="utf-8")
+    return done
 
 
 def undo_last(folder: str | os.PathLike, count: int = 1) -> list[str]:

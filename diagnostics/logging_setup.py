@@ -13,7 +13,6 @@ import contextvars
 import hashlib
 import logging
 import logging.handlers
-import os
 import queue
 import re
 import time

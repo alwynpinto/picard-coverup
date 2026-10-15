@@ -2,30 +2,88 @@
 
 Find, compare and apply album artwork from many sources, as embedded tags, as files in a folder you name, or both.
 
-**Status: early development (Phase 1 skeleton).** Not yet usable from Picard's menus. What exists today is the tested core:
+**Version 0.2.0. Needs Picard 3.0 or newer.**
 
-| Area | Module | State |
-|---|---|---|
-| Data model, tiers (A exact release / B release group / C unanchored / G generated) | `model.py` | done |
-| Perceptual hashing, similarity clustering | `matching/phash.py`, `matching/cluster.py` | done, tested |
-| Resolution limits, scoring with explanations, consensus selection, conflict detection | `matching/scoring.py` | done, tested |
-| Disc-number matching | `matching/disc.py` | done, tested |
-| Folder names (`covers` default, `art`, `artwork`, `booklet`, custom), file names, atomic writes, backups, undo journal | `apply/files.py` | done, tested |
-| Logging: 2 MB x 3 rotating default, variable-size modes, secret redaction, run/album IDs | `diagnostics/logging_setup.py` | done, tested |
-| Creative/AI fallback trigger logic | `creative/trigger.py` | logic only; no image generation yet |
-| Plugin entry point (logging + settings) | `__init__.py`, `MANIFEST.toml` | skeleton |
+## What it does
 
-Not built yet: provider clients (Cover Art Archive, Discogs, Fanart.tv, ...), the review dialog, the Picard actions and file post-save hook, options page, AI backends, logo/title compositor. See `docs/design-prompt.md` for the full design and `docs/phase0-api-contract.md` for the verified Picard 3.0 plugin API notes.
+Right-click an album (or a cluster, track or file) in Picard:
 
-## Requirements
-Picard 3.0+ (Python 3.10+, PyQt6). No third-party Python packages are needed (Picard does not bundle Pillow, so image work uses Qt).
+| Menu item | What happens |
+|---|---|
+| **CoverUp: Find artwork…** | Searches every enabled source, shows the candidates per art type with CoverUp's pick highlighted, and applies what you choose. |
+| **CoverUp: Auto-apply** | For all selected albums: applies confident results, marks conflicts and misses for review (double-click a row to review it). |
+| **CoverUp: Undo last apply** | Removes the files the last apply wrote and restores any files it replaced (from `.coverup-backup`). |
+
+### Sources
+Cover Art Archive (exact release and release group), Discogs (exact release via the MusicBrainz link, barcode, catalogue number or search), Fanart.tv (covers, numbered disc art, artist images and logos), TheAudioDB, iTunes, Deezer, Last.fm, web image search with **your own** Brave or Google API key (pages are never scraped), and images already in the album folder.
+
+### How the pick is made
+1. **Exact release** art (tier A: Cover Art Archive release images, or the matching Discogs release) wins.
+2. Otherwise **release-group** art (tier B: CAA release group, Fanart.tv, TheAudioDB).
+3. Otherwise the image that the **most independent sources agree on** visually (perceptual hashing).
+4. If exact-release art and a large group of other sources disagree, nothing is applied automatically; the album is flagged for review.
+
+Hover any thumbnail for its score breakdown and why it was or wasn't chosen.
+
+### Art types
+Front, back, disc (matched to the right disc using `discnumber` tags), booklet pages, and artist images (photo, logo, background, banner). Choose any combination per run; set the default in Options.
+
+### Output
+- **Embed in tags** (resized to a maximum you set, default 1200 px). Disc art is embedded only into that disc's files.
+- **Save as files** in a sub-folder you name: `covers` (default), `art`, `artwork`, `booklet` or your own, or in the album folder itself. By default the front cover is also saved as `cover.jpg` in the album folder, where players look for it.
+- File names: default, Kodi/Jellyfin, Plex presets, or your own templates (`disc{discnumber}`, `booklet-{n}`).
+- Artist images go to the artist folder (the folder above the album; `Album/CD1` layouts are recognised).
+- Files are written **after Picard saves the album** (so they follow renames and moves), or immediately if you prefer.
+- If a file exists: replace only if the new one is larger (default), replace, keep, or keep both. Replaced files are backed up and can be undone.
+- `coverup.json` next to the files records where each image came from.
+
+### Resolution limits
+Separate minimums per art type for **searching** (smaller results are hidden but can be shown), an optional maximum, a preferred size, and separate **apply** limits: maximum size for embedded images and for files, and a minimum below which nothing is applied (and the creative fallback can kick in). Images are never upscaled unless you turn that on.
+
+### Creative / AI art (off by default)
+- **When:** no cover found, best cover below the apply minimum, only conflicting covers found, or **always** (even when a real cover exists).
+- **How, in your order:** fan art from Fanart.tv → AI → offline template.
+- **Styles:** Art, Fantasy, Nature, Planetary/Space, Cyberpunk, Minimal, Vintage, Photographic, Geometric/Bauhaus, Gothic, Retro pop, or your own prompt. Templates are editable `.toml` files; put your own in the templates folder (Options > CoverUp > Creative / AI > Open my templates folder).
+- **Era and genre matching** from the release year and genre tag.
+- **Logo and title are drawn by CoverUp, not the AI**, so they are sharp and correctly spelled. The band logo comes from Fanart.tv/TheAudioDB (pick a logo variant once per artist; it is remembered), else the artist name is set as text.
+- **AI backends you configure yourself:** a local Stable Diffusion web UI (AUTOMATIC1111 started with `--api`), any OpenAI-compatible images API, or a custom HTTP endpoint. Nothing is bundled or hosted by CoverUp.
+- Generated art is always **labelled** (image comment "Generated by CoverUp…", `coverup.json`, `%_coverup_generated%`), never uploaded anywhere, and never outranks real art except in the cases you switched on. Remote AI services ask for your consent first; the current cover is only sent as a reference to a remote service if you allow that separately.
+
+### Script variables
+`%_coverup_status%` (applied / review / none), `%_coverup_source%`, `%_coverup_confidence%` (A/B/C/G), `%_coverup_generated%`.
+
+### Logging
+A log file for troubleshooting: rotating 2 MB × 3 by default, or size-capped, age-based or one-per-session. API keys are always masked. Options > CoverUp > Logging has *Open log folder* and *Export diagnostics bundle…* (a redacted zip to attach to a bug report). Flatpak Picard keeps it in `~/.var/app/org.musicbrainz.Picard/cache/MusicBrainz/Picard/coverup/logs/`.
+
+## Setup
+1. Install: Options > Plugins > Install Plugin… (or `picard-cli plugins install <this folder or repo URL>`; Flatpak: `flatpak run --command=picard-cli org.musicbrainz.Picard plugins install …`).
+2. Options > Plugins > **CoverUp** > Sources: add the keys you have.
+   - Discogs: personal access token (discogs.com > Settings > Developers).
+   - Fanart.tv: free project API key (fanart.tv/get-an-api-key).
+   - Last.fm and web image search are optional.
+   - Cover Art Archive, TheAudioDB (public test key), iTunes and Deezer work without keys.
+3. Picard's own Options > Cover Art > *Embed cover images into tags* must be on for embedding. If *Embed only a single front image* is on, only the front is embedded.
+
+## Updating from this repository
+```
+cd ~/Documents/Github/picard-coverup && git pull
+```
+Then Options > Plugins > select CoverUp > Update (or `picard-cli plugins update CoverUp`), and restart Picard.
+
+## Known limits
+- Generated art is made for the front cover only; back, disc and booklet images are always real scans.
+- Discogs does not label secondary images; they are offered in the Back/Discs/Booklet tabs for you to pick but never auto-selected.
+- HTTP requests use Python's standard library (proxy settings from the `HTTPS_PROXY` environment variable), not Picard's network settings.
+- Embedded images can be changed until you save; to drop unsaved changes, remove and reload the album. Undo covers files CoverUp wrote.
+- Provider responses were tested against fixtures written from each API's documentation; please report any source that returns nothing with the diagnostics bundle.
 
 ## Development
 ```
-python -m venv .venv && .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q          # runs without Picard installed
-picard-cli plugins install .           # install this folder into Picard 3 for manual testing
+python -m venv .venv && .venv/bin/pip install pytest PyQt6
+.venv/bin/python -m pytest -q                       # core + Qt tests
+PICARD_SRC=/path/to/picard-3.x-source .venv/bin/python -m pytest -q   # also the Picard integration and UI tests
 ```
+`docs/design-prompt.md` is the full design; `docs/phase0-api-contract.md` lists the Picard 3 APIs used, verified against the Picard 3.0 source.
 
 ## Licence
 GPL-2.0-or-later, same as Picard.

@@ -59,3 +59,9 @@ Importable from `picard.plugin3.api`: `Album, BaseAction, Cluster, CoverArtImage
 - Whether Qt image decoding/scaling (`QImage`) is safe off the GUI thread in Picard's worker threads (expected: yes for `QImage`, no for `QPixmap`).
 - Provider API terms and quotas (Discogs, Fanart.tv, TheAudioDB, Google Custom Search), and AI backend API shapes: to be checked per provider when each is implemented.
 - Registry submission requirements (`picard-cli plugins` and the registry repo), to be checked in Phase 4.
+
+## Implementation notes (v0.2.0)
+- Verified by tests that import the real Picard 3.0 source (`PICARD_SRC`): plugin registration, `CoverArtImage` creation with `support_types=True` and `can_be_saved_to_disk=False`, `CoverArtSetter` on real `Album`/`File` objects, per-disc embedding, the post-save hook, and the Qt dialogs (off-screen).
+- HTTP uses `urllib` in Picard's thread pool (`picard.util.thread.run_task`) rather than Picard's async web service: the multi-source pipeline is far simpler as blocking code in a worker, with its own per-host rate limits. Trade-off: Picard's proxy settings are not used (the standard proxy environment variables are).
+- Settings live in `api.plugin_config` (profile-aware). `plugin_persist` is not used for keys because Picard documents it as discardable.
+- Fixtures for each provider were written from its documented response format; live responses have not been recorded yet.

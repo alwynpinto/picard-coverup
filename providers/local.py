@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+# CoverUp: MusicBrainz Picard plugin. GPL-2.0-or-later.
+"""Local images already in the album folder (and its art sub-folders). Used as candidates and as the
+reference for "is the new image better than what I have?"."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from ..imageinfo import probe
+from ..matching.disc import parse_disc_number
+from ..model import ArtType, Candidate, Query, Tier
+from .base import Provider
+
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+SUBFOLDERS = ("covers", "cover", "art", "artwork", "artworks", "scans", "booklet", "images")
+MAX_LOCAL = 40
+
+_FRONT = re.compile(r"^(cover|folder|front|album|albumart|albumartsmall)\b", re.IGNORECASE)
+_BACK = re.compile(r"^(back|rear|backcover|back-cover)\b", re.IGNORECASE)
+_DISC = re.compile(r"^(disc|disk|cd|cdart|vinyl|medium)\s*[-_ ]?\s*(\d+)?", re.IGNORECASE)
+_BOOKLET = re.compile(r"^(booklet|inlay|insert|tray|inside|scan|page)", re.IGNORECASE)
+
+
+def classify(name: str) -> tuple[ArtType, int | None]:
+    stem = Path(name).stem
+    if _BACK.match(stem):
+        return ArtType.BACK, None
+    m = _DISC.match(stem)
+    if m:
+        return ArtType.DISC, int(m.group(2)) if m.group(2) else parse_disc_number(stem)
+    if _BOOKLET.match(stem):
+        return ArtType.BOOKLET, None
+    if _FRONT.match(stem):
+        return ArtType.FRONT, None
+    return ArtType.OTHER, None
+
+
+def scan_folder(folder: str | Path) -> list[Candidate]:
+    base = Path(folder)
+    out: list[Candidate] = []
+    dirs = [base] + [base / s for s in SUBFOLDERS if (base / s).is_dir()]
+    for d in dirs:
+        try:
+            entries = sorted(p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXT)
+        except OSError:
+            continue
+        for p in entries:
+            if len(out) >= MAX_LOCAL:
+                return out
+            art, disc = classify(p.name)
+            try:
+                data = p.read_bytes()
+            except OSError:
+                continue
+            info = probe(data[:65536])
+            w, h = (info[0], info[1]) if info else (0, 0)
+            c = Candidate(
+                "local", str(p), p.as_uri(), art, Tier.B, width=w, height=h, bytes=len(data), dims_known=bool(info),
+                disc_number=disc, thumb_data=data, data=data, attribution="local file", comment=p.name,
+                type_confidence=0.9 if art != ArtType.OTHER else 0.2,
+            )
+            c.extra["local_path"] = str(p)
+            out.append(c)
+    return out
+
+
+class LocalFiles(Provider):
+    ID = "local"
+    NAME = "Local files"
+
+    def search(self, q: Query) -> list[Candidate]:
+        out: list[Candidate] = []
+        seen: set[str] = set()
+        for d in q.album_dirs:
+            for c in scan_folder(d):
+                if c.provider_id not in seen:
+                    seen.add(c.provider_id)
+                    out.append(c)
+        return out
