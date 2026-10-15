@@ -2,7 +2,7 @@
 
 Find, compare and apply album artwork from many sources, as embedded tags, as files in a folder you name, or both.
 
-**Version 0.2.0. Needs Picard 3.0 or newer.**
+**Version 0.2.1. Needs Picard 3.0 or newer.**
 
 ## What it does
 

@@ -167,6 +167,7 @@ class ReviewDialog(QDialog):
         elif only_one:
             warn.append("Picard's “Embed only a single front image” option is on: back/disc/booklet images will not be embedded.")
         self.warning.setText(" ".join(warn))
+        self.warning.setVisible(bool(warn))
 
     @staticmethod
     def _tab_help(key: str) -> str:
@@ -230,6 +231,7 @@ class ReviewDialog(QDialog):
         self.var_spin = QSpinBox()
         self.var_spin.setRange(1, 8)
         self.var_spin.setValue(int(self.s["creative_variations"]))
+        self.var_spin.setMaximumWidth(70)
         g.addWidget(self.var_spin, 0, 5)
         g.addWidget(QLabel("Logo:"), 1, 0)
         self.logo_combo = QComboBox()
@@ -244,7 +246,11 @@ class ReviewDialog(QDialog):
         self.pos_combo = QComboBox()
         self.pos_combo.addItems(["top", "center", "bottom"])
         self.pos_combo.setCurrentText(self.s["creative_logo_position"])
-        g.addWidget(self.pos_combo, 1, 4)
+        pos_row = QHBoxLayout()
+        pos_row.addWidget(QLabel("Position:"))
+        pos_row.addWidget(self.pos_combo)
+        pos_row.addStretch(1)
+        g.addLayout(pos_row, 1, 4, 1, 2)
         self.ref_cb = QCheckBox("Use the current/low-res cover as a reference (AI image-to-image)")
         self.ref_cb.setChecked(bool(self.s["ai_img2img"]))
         g.addWidget(self.ref_cb, 2, 0, 1, 4)
@@ -462,6 +468,7 @@ class ReviewDialog(QDialog):
             self.creative_grid.add_candidate(c, select=False)
         if result:
             self.creative_grid.item(0).setSelected(True)
+            self.use_generated.setChecked(True)
 
     def _save_setting(self, key, value) -> None:
         try:

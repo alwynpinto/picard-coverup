@@ -79,9 +79,10 @@ def icon_for(c: Candidate) -> QIcon:
             )
             if c.generated:
                 p = QPainter(pm)
-                p.fillRect(0, 0, 34, 16, QColor(TIER_COLOR[Tier.G]))
+                badge = "AI" if c.extra.get("method") == "ai" else "GEN"
+                p.fillRect(0, 0, 12 + 9 * len(badge), 16, QColor(TIER_COLOR[Tier.G]))
                 p.setPen(QColor("white"))
-                p.drawText(2, 12, "AI")
+                p.drawText(4, 12, badge)
                 p.end()
             return QIcon(pm)
     return placeholder_icon("no preview")
