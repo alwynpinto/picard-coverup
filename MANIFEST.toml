@@ -1,0 +1,17 @@
+uuid = "be95dccc-b521-488a-843f-4af29033de41"
+name = "CoverUp"
+description = "Find, compare and apply album artwork from many sources, as embedded tags and/or files."
+long_description = """
+CoverUp searches several artwork sources (Cover Art Archive, Discogs, Fanart.tv and more),
+matches the exact release first, falls back to visual consensus across sources, and lets you
+choose which art types (front, back, disc, booklet, artist) to apply, as embedded tags,
+as files in a folder you name, or both. Includes logging for troubleshooting.
+
+Status: early development. See the project README.
+"""
+api = ["3.0"]
+authors = ["herculepirate"]
+license = "GPL-2.0-or-later"
+license_url = "https://www.gnu.org/licenses/gpl-2.0.html"
+categories = ["coverart"]
+min_python_version = "3.10"
