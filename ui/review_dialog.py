@@ -931,17 +931,22 @@ class ReviewDialog(QDialog):
         pipeline = self.pipeline
 
         def work():
-            for it in items:
-                if it.candidate.data is None:
-                    pipeline.fetch_full(it.candidate)
-            return items
+            return pipeline.fetch_items(items)
 
-        def done(_result, error):
+        def done(result, error):
             self._busy_applying = False
             if error is not None:
                 self._update_summary()
                 self.status.setText(f"Downloading failed ({error}). Nothing was applied.")
                 return
+            items, failed = result
+            if failed:
+                names = ", ".join(f"{it.art_type.value} ({it.candidate.provider})" for it, _e in failed)
+                if not items:
+                    self._update_summary()
+                    self.status.setText(f"Downloading failed for {names}: {failed[0][1]}. Nothing was applied; try another source or press Apply again.")
+                    return
+                QMessageBox.warning(self, "CoverUp", f"Could not download: {names}.\nThe other images are being applied; choose another source for these and apply again.")
             notes = glue.apply_plan(self.target, items, s, embed_on, files_on, status="applied")
             log.info("Applied by the user: %s (embed=%s, files=%s)", ", ".join(sorted({i.art_type.value for i in items})), embed_on, files_on)
             message = glue.describe_apply(self.target, items, s, embed_on, files_on)

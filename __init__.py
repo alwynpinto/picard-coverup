@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 _log = logging.getLogger("coverup")
 

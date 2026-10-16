@@ -195,3 +195,24 @@ def test_fetch_full_measures_real_size():
     c = Candidate("caa", "1", "https://x/full.jpg")
     Pipeline(settings(), http, imaging.fingerprint).fetch_full(c)
     assert (c.width, c.height, c.bytes) == (777, 777, len(data))
+
+
+def test_fetch_full_falls_back_to_a_smaller_version_when_the_original_fails():
+    from coverup.model import Candidate
+
+    small = make_image("a", 500)
+    http = FakeHttp({"https://x/big.png": 500, "https://x/1200.jpg": 503, "https://x/500.jpg": small})
+    c = Candidate("caa", "1", "https://x/big.png")
+    c.extra["fallback_urls"] = ["https://x/1200.jpg", "https://x/500.jpg"]
+    Pipeline(settings(), http, imaging.fingerprint).fetch_full(c)
+    assert c.url == "https://x/500.jpg" and c.width == 500
+
+
+def test_fetch_items_applies_what_downloaded_and_reports_the_rest():
+    from coverup.model import Candidate
+    from coverup.pipeline import PlanItem
+
+    good, bad = Candidate("caa", "1", "https://x/ok.jpg"), Candidate("caa", "2", "https://x/bad.jpg")
+    http = FakeHttp({"https://x/ok.jpg": make_image("a", 600), "https://x/bad.jpg": 500})
+    ok, failed = Pipeline(settings(), http, imaging.fingerprint).fetch_items([PlanItem(ArtType.FRONT, good), PlanItem(ArtType.BACK, bad)])
+    assert [i.art_type for i in ok] == [ArtType.FRONT] and [i.art_type for i, _e in failed] == [ArtType.BACK]

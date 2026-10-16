@@ -55,9 +55,7 @@ def make_provider_class(Base):
                 def work():
                     res = pipeline.run(q)
                     plan, notes = pipeline.auto_plan(res)
-                    for item in plan:
-                        if item.candidate.data is None:
-                            pipeline.fetch_full(item.candidate)
+                    plan, _failed = pipeline.fetch_items(plan)
                     return res, plan, notes
 
                 run_in_background(work, lambda result, error: self._done(s, result, error))

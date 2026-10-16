@@ -103,9 +103,8 @@ class BatchDialog(QDialog):
                 if cand is not None:
                     plan = [p for p in plan if p.art_type != ArtType.FRONT]
                     plan.insert(0, PlanItem(ArtType.FRONT, cand))
-            for item in plan:
-                if item.candidate.data is None:
-                    pipeline.fetch_full(item.candidate)
+            plan, failed = pipeline.fetch_items(plan)
+            notes = [*notes, *(f"Could not download the {it.art_type.value} from {it.candidate.provider}: {e}" for it, e in failed)]
             return res, plan, notes, creative_note
 
         def done(result, error):

@@ -347,15 +347,47 @@ class Pipeline:
         return plan, notes
 
     def fetch_full(self, c: Candidate) -> bytes:
-        """Download the full-size image (once) and record its real size."""
+        """Download the full-size image (once) and record its real size.
+
+        If the original cannot be fetched (a busy archive answering HTTP 500 for a huge scan, say), the
+        candidate's smaller renditions are tried in turn, so a server hiccup costs resolution, not the cover.
+        """
         if c.data is None:
-            resp = self.http.get(c.url, cache=False)
-            c.data = resp.data
+            last: HttpError | None = None
+            urls = [c.url, *(c.extra.get("fallback_urls") or [])]
+            for n, url in enumerate(urls):
+                try:
+                    c.data = self.http.get(url, cache=False).data
+                except HttpError as exc:
+                    last = exc
+                    log.warning("Download failed (%s); %s", exc, "trying a smaller version" if n < len(urls) - 1 else "no more versions")
+                    continue
+                if url != c.url:
+                    log.info("Used a smaller version of %s: %s", c.url, url)
+                    c.url = url
+                break
+            if c.data is None:
+                raise last or HttpError(0, c.url, "no data")
         c.bytes = len(c.data)
         info = probe(c.data[:PROBE_BYTES])
         if info:
             c.width, c.height, c.dims_known = info[0], info[1], True
         return c.data
+
+    def fetch_items(self, items: list) -> tuple[list, list[tuple[object, Exception]]]:
+        """Download each plan item. Returns (items that downloaded, [(item, error)]); one failure never blocks the rest."""
+        ok, failed = [], []
+        for it in items:
+            try:
+                if it.candidate.data is None:
+                    self.fetch_full(it.candidate)
+                ok.append(it)
+            except Cancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 - reported per image
+                log.warning("Skipping %s from %s: %s", it.art_type.value, it.candidate.provider, exc)
+                failed.append((it, exc))
+        return ok, failed
 
 
 # ---- context propagation into worker threads (so log lines keep their run/album IDs) --------------

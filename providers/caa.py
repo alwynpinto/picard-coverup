@@ -30,7 +30,7 @@ def parse_images(payload: dict, tier: Tier) -> list[Candidate]:
     out: list[Candidate] = []
     booklet_page = 0
     for img in payload.get("images") or []:
-        url = img.get("image") or ""
+        url = (img.get("image") or "").replace("http://", "https://", 1)
         if not url:
             continue
         types = [t.lower() for t in img.get("types") or []]
@@ -56,6 +56,8 @@ def parse_images(payload: dict, tier: Tier) -> list[Candidate]:
         if art == ArtType.BOOKLET:
             booklet_page += 1
             cand.page = booklet_page
+        # smaller renditions, tried if the original (often a huge PNG) cannot be downloaded
+        cand.extra["fallback_urls"] = [u.replace("http://", "https://", 1) for k in ("1200", "large", "500") if (u := thumbs.get(k))]
         cand.extra["caa_types"] = types
         cand.extra["approved"] = bool(img.get("approved", True))
         out.append(cand)
