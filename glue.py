@@ -433,6 +433,35 @@ def on_file_saved(api, file) -> None:
         log.exception("Writing artwork after save failed")
 
 
+def on_file_attached(api, track, file) -> None:
+    """Picard matched a file to a track (Lookup, Scan or drag): it now takes the release's tags, cover included.
+
+    Whatever CoverUp queued for that loose file is dropped, so the covers folder cannot end up holding a different
+    picture from the tags. Albums are unaffected: their plans are keyed by the album, not by the loose files."""
+    try:
+        plan = STATE.pending_files.pop(id(file), None)
+        if plan is None:
+            return
+        if not any(p is plan for p in STATE.pending_files.values()):
+            for key in [k for k, p in STATE.pending.items() if p is plan]:
+                STATE.pending.pop(key, None)
+        log.info("Dropped queued CoverUp files for %s: it was matched to a release, which replaces the cover", getattr(file, "filename", "?"))
+        notify("CoverUp: Lookup replaced the cover on a file CoverUp had applied art to. Run CoverUp on the album now that it is matched.")
+    except Exception:
+        log.exception("Could not drop queued files for a matched file")
+
+
+UNMATCHED_NOTE = (
+    "These files are not matched to a MusicBrainz release yet. A later Lookup or Scan replaces this cover with the release's, "
+    "and drops the image files CoverUp queued for them. For an exact match, look the album up first, then run CoverUp on it."
+)
+
+
+def is_unmatched(target) -> bool:
+    """Loose files with no MusicBrainz release id: a Lookup would replace what is applied to them."""
+    return isinstance(target, FileGroup) and not any(f.metadata.get("musicbrainz_albumid") for f in target.files)
+
+
 def undo_last(target) -> list[str]:
     """Undo the files written by the last CoverUp apply for this album (restoring backups)."""
     key = key_of(target)
@@ -529,7 +558,11 @@ def apply_plan(target, items: list[PlanItem], s: Settings, embed_on: bool, files
         target.update()
     except Exception:
         pass
-    notify(describe_apply(target, items, s, embed_on, files_on))
+    message = describe_apply(target, items, s, embed_on, files_on)
+    if is_unmatched(target):
+        notes.append(UNMATCHED_NOTE)
+        message += " Not matched to a release yet: a Lookup will replace it."
+    notify(message)
     return notes
 
 

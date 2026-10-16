@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 _log = logging.getLogger("coverup")
 
@@ -145,6 +145,7 @@ def enable(api) -> None:
     api.register_track_action(FindArtwork)
     api.register_file_action(FindArtwork)
     api.register_file_post_save_processor(glue.on_file_saved)
+    api.register_file_post_addition_to_track_processor(glue.on_file_attached)
     _register_cover_art_provider(api)
     api.register_options_page(_make_options_page_class(OptionsPage))
     for name, doc in glue.SCRIPT_VARIABLES.items():

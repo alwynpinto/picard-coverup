@@ -218,3 +218,62 @@ def test_provider_never_stalls_picard_when_the_search_fails_or_finds_nothing(pic
 def test_provider_is_listed_with_a_title_picard_can_show(picard_env, monkeypatch):
     cls, _ = provider_env(monkeypatch, picard_env, {})
     assert cls.name == "CoverUp" and "CoverUp" in cls.display_title()
+
+
+# ---- Lookup after applying to loose files --------------------------------------------------------------
+
+def applied_loose(picard_env, mbid=""):
+    from coverup import glue
+    from coverup.model import ArtType, Candidate, Tier
+    from coverup.pipeline import PlanItem
+    from coverup.settings import Settings
+
+    files = loose_files(picard_env, 2, album="Matched Album" if mbid else "Loose Album")
+    for f in files:
+        if mbid:
+            f.metadata["musicbrainz_albumid"] = mbid
+    (group,) = glue.unique_targets([special_cluster(files)])
+    glue.STATE.pending.clear()
+    glue.STATE.pending_files.clear()
+    front = Candidate("caa", "1", "u", ArtType.FRONT, Tier.A, data=make_image("a", 900))
+    notes = glue.apply_plan(group, [PlanItem(ArtType.FRONT, front)], Settings.from_mapping({}), embed_on=True, files_on=True)
+    return files, group, notes
+
+
+def test_applying_to_unmatched_files_says_a_lookup_will_replace_it(picard_env):
+    from coverup import glue
+
+    _files, _group, notes = applied_loose(picard_env)
+    assert glue.UNMATCHED_NOTE in notes and "look the album up first" in glue.UNMATCHED_NOTE
+    _f2, _g2, notes2 = applied_loose(picard_env, mbid=REL)  # already matched to a release: no warning
+    assert glue.UNMATCHED_NOTE not in notes2
+
+
+def test_a_lookup_drops_the_queued_files_so_covers_folder_and_tags_agree(picard_env):
+    from picard.track import Track
+
+    from coverup import glue
+
+    files, group, _notes = applied_loose(picard_env)
+    folder = os.path.dirname(files[0].filename)
+    assert glue.STATE.pending and len(glue.STATE.pending_files) == 2
+    album, _ = build_album(picard_env, discs=1)
+    track = Track("t9", album)
+    glue.on_file_attached(None, track, files[0])  # Picard matched the first file
+    assert id(files[0]) not in glue.STATE.pending_files and glue.STATE.pending  # the second file is still loose
+    glue.on_file_attached(None, track, files[1])
+    assert not glue.STATE.pending_files and not glue.STATE.pending  # nothing left to write
+    glue.on_file_saved(None, files[0])
+    assert not os.path.exists(os.path.join(folder, "covers", "cover.jpg")) and not os.path.exists(os.path.join(folder, "cover.jpg"))
+
+
+def test_a_file_that_was_never_loose_is_left_alone_when_it_joins_a_track(picard_env):
+    from picard.track import Track
+
+    from coverup import glue
+
+    album, files = build_album(picard_env, discs=1)
+    glue.STATE.pending["album:x"] = object()
+    glue.on_file_attached(None, Track("t1", album), files[0])
+    assert "album:x" in glue.STATE.pending
+    glue.STATE.pending.clear()

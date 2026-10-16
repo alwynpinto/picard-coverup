@@ -2,11 +2,11 @@
 
 Find, compare and apply album artwork from many sources, as embedded tags, as files in a folder you name, or both.
 
-**Version 0.4.0. Needs Picard 3.0 or newer.**
+**Version 0.4.1. Needs Picard 3.0 or newer.**
 
 ## What it does
 
-Right-click an album, a cluster, a track or a file in Picard. Loose files under **Unclustered Files** work too: CoverUp groups them by their own album and album-artist tags and searches with those.
+Right-click an album, a cluster, a track or a file in Picard. Loose files under **Unclustered Files** work too: CoverUp groups them by their own album and album-artist tags and searches with those. Best order for new files: **Lookup or Scan first, then CoverUp on the album.** A Lookup replaces a file's tags, cover included, with the release's; CoverUp then drops the image files it had queued for that file and tells you, so the covers folder never disagrees with the tags. Applying to files that are not matched yet works, but says so.
 
 | Menu item | What happens |
 |---|---|
