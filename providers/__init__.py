@@ -10,9 +10,10 @@ from .fanart import FanartTv
 from .local import LocalFiles
 from .stores import Deezer, ITunes, LastFm
 from .websearch import WebSearch
+from .wikimedia import Wikimedia
 
 REGISTRY: dict[str, type[Provider]] = {
-    cls.ID: cls for cls in (CoverArtArchive, Discogs, FanartTv, TheAudioDB, ITunes, Deezer, LastFm, WebSearch, LocalFiles)
+    cls.ID: cls for cls in (CoverArtArchive, Discogs, Wikimedia, FanartTv, TheAudioDB, ITunes, Deezer, LastFm, WebSearch, LocalFiles)
 }
 
 __all__ = ["REGISTRY", "Provider"]

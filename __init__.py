@@ -6,6 +6,7 @@ Entry points (right-click an album, cluster, track or file):
   * CoverUp: Find artwork…      opens the review dialog
   * CoverUp: Auto-apply         applies confident results for every selected album, lists the rest
   * CoverUp: Undo last apply    restores/removes the files written by the last apply
+  * a "CoverUp" entry in Options > Cover Art, so Picard's own album loading can use CoverUp too
 
 Picard-facing modules are imported inside ``enable`` so the rest of the package can be unit tested
 without Picard installed.
@@ -16,7 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 _log = logging.getLogger("coverup")
 
@@ -144,12 +145,26 @@ def enable(api) -> None:
     api.register_track_action(FindArtwork)
     api.register_file_action(FindArtwork)
     api.register_file_post_save_processor(glue.on_file_saved)
+    _register_cover_art_provider(api)
     api.register_options_page(_make_options_page_class(OptionsPage))
     for name, doc in glue.SCRIPT_VARIABLES.items():
         try:
             api.register_script_variable(name, documentation=doc)
         except Exception as exc:  # older 3.x without this API, or a name clash
             _log.debug("Script variable %s not registered: %s", name, exc)
+
+
+def _register_cover_art_provider(api) -> None:
+    """List CoverUp among Picard's cover art providers (Options > Cover Art). Never stops the plugin loading."""
+    try:
+        from picard.plugin3.api import CoverArtProvider
+
+        from .picard_provider import make_provider_class
+
+        api.register_cover_art_provider(make_provider_class(CoverArtProvider))
+        _log.info("Registered as a Picard cover art provider")
+    except Exception:
+        _log.warning("Could not register as a Picard cover art provider", exc_info=True)
 
 
 def disable() -> None:

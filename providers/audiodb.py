@@ -91,6 +91,6 @@ class TheAudioDB(Provider):
         out: list[Candidate] = []
         if is_mbid(q.rg_mbid):
             out += parse_album(self._get("album-mb.php", i=q.rg_mbid), q.medium_count)
-        if is_mbid(q.artist_mbid):
+        if is_mbid(q.artist_mbid) and self.wants_artist_art(q):
             out += parse_artist(self._get("artist-mb.php", i=q.artist_mbid))
         return out

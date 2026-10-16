@@ -85,6 +85,35 @@ def parse_release_images(rel: dict, tier: Tier) -> list[Candidate]:
     return out
 
 
+def parse_artist_images(artist: dict, tier: Tier) -> list[Candidate]:
+    """Photos on a Discogs artist page. The first ('primary') image is the one Discogs shows as the artist's face."""
+    out: list[Candidate] = []
+    aid = artist.get("id")
+    name = re.sub(r"\s*\(\d+\)$", "", artist.get("name", ""))  # Discogs numbers namesakes: "Genesis (2)"
+    for i, img in enumerate(artist.get("images") or []):
+        url = img.get("uri") or img.get("resource_url") or ""
+        if not url:
+            continue
+        primary = img.get("type") == "primary"
+        c = Candidate(
+            provider="discogs",
+            provider_id=f"artist:{aid}:{i}",
+            url=url,
+            art_type=ArtType.ARTIST_THUMB,
+            tier=tier,
+            width=int(img.get("width") or 0),
+            height=int(img.get("height") or 0),
+            dims_known=bool(img.get("width") and img.get("height")),
+            thumb_url=img.get("uri150") or url,
+            type_confidence=0.9 if primary else 0.6,
+            attribution=f"Discogs artist {aid}",
+            comment=f"Discogs artist: {name}",
+            page=i,
+        )
+        out.append(c)
+    return out
+
+
 class Discogs(Provider):
     ID = "discogs"
     NAME = "Discogs"
@@ -149,4 +178,22 @@ class Discogs(Provider):
         for c in cands:
             c.extra["discogs_confidence"] = round(conf, 2)
             c.extra["discogs_found_via"] = how
+        if self.wants_artist_art(q):
+            cands += self.artist_images(q, rel, tier)
         return cands
+
+    def artist_images(self, q: Query, rel: dict, tier: Tier) -> list[Candidate]:
+        """Photos from the Discogs page of the release's main artist (never for 'Various')."""
+        artists = [a for a in rel.get("artists") or [] if a.get("id") and a.get("name", "").lower() not in ("various", "various artists")]
+        if not artists:
+            return []
+        try:
+            artist = self.http.get_json(f"{API}/artists/{int(artists[0]['id'])}", self._headers())
+        except HttpError as exc:
+            self.log.warning("Discogs artist %s failed: %s", artists[0].get("id"), exc)
+            return []
+        # the release's artist is the right person even when the tagged name is spelled differently,
+        # but only trust it as exact (tier A) when the release itself was an exact match
+        out = parse_artist_images(artist or {}, tier)[:5]
+        self.log.info("Discogs artist %s: %d image(s)", artists[0].get("id"), len(out))
+        return out

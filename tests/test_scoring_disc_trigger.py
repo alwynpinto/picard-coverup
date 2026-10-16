@@ -133,12 +133,41 @@ def test_migration_moves_untouched_defaults_and_keeps_user_choices():
     old_user = {"settings_version": 0, "apply_types": ["front"], "prefer_largest": False, "apply_min_side": 450,
                 "jpeg_quality": 92, "record_source_in_comment": True}
     changed = migrate(old_user)
-    assert old_user["apply_types"] == ["front", "back", "disc", "booklet"] and old_user["prefer_largest"] is True
+    assert old_user["apply_types"] == ["front", "back", "disc", "booklet", "artist"] and old_user["prefer_largest"] is True
     assert old_user["apply_min_side"] == 450  # the user's own value is kept
-    assert set(changed) == {"apply_types", "prefer_largest", "jpeg_quality", "record_source_in_comment", "min_back", "min_disc", "min_booklet", "min_artist"}
+    assert set(changed) == {"apply_types", "prefer_largest", "jpeg_quality", "record_source_in_comment", "min_back", "min_disc", "min_booklet", "min_artist", "providers_enabled"}
+    assert "wikimedia" in old_user["providers_enabled"]
     assert old_user["settings_version"] == SETTINGS_VERSION
     again = dict(old_user, prefer_largest=False)
     assert migrate(again) == [] and again["prefer_largest"] is False  # runs once only
+
+
+def test_migration_from_0_3_keeps_a_users_own_choices():
+    from coverup.settings import migrate
+
+    # a user who had picked front and back only, and their own source list, keeps both
+    cfg = {"settings_version": 2, "apply_types": ["front", "back"], "providers_enabled": ["caa", "discogs"]}
+    assert migrate(cfg) == []
+    assert cfg["apply_types"] == ["front", "back"] and cfg["providers_enabled"] == ["caa", "discogs"]
+    # the 0.3 defaults move to the 0.4 defaults
+    cfg = {"settings_version": 2, "apply_types": ["front", "back", "disc", "booklet"],
+           "providers_enabled": ["caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "local"]}
+    assert set(migrate(cfg)) == {"apply_types", "providers_enabled"}
+    assert "artist" in cfg["apply_types"] and "wikimedia" in cfg["providers_enabled"]
+
+
+def test_artist_types_follow_the_artist_settings():
+    from coverup.settings import Settings
+
+    s = Settings.from_mapping({})
+    assert s.artist_art_types() == {ArtType.ARTIST_THUMB}
+    assert ArtType.ARTIST_THUMB in s.apply_art_types() and ArtType.ARTIST_LOGO not in s.apply_art_types()
+    s = Settings.from_mapping({"artist_types": ["thumb", "logo", "banner"]})
+    assert s.artist_art_types() == {ArtType.ARTIST_THUMB, ArtType.ARTIST_LOGO, ArtType.ARTIST_BANNER}
+    off = Settings.from_mapping({"artist_art": False})
+    assert off.artist_art_types() == set() and not (off.apply_art_types() & {ArtType.ARTIST_THUMB})
+    # leaving "artist" out of the types list also turns the group off
+    assert ArtType.ARTIST_THUMB not in Settings.from_mapping({"apply_types": ["front"]}).apply_art_types()
 
 
 def test_embed_types():

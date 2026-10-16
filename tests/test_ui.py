@@ -244,3 +244,52 @@ def test_search_menu_paste_and_drop(picard_env, state, monkeypatch):
     assert wait_until(lambda: shown)
     assert "web page, not an image" in shown[0] and front.grid.count() == before + 2
     dlg.reject()
+
+
+def test_double_click_applies_that_picture_at_once_and_keeps_the_window_open(picard_env, state):
+    from coverup import glue
+
+    dlg, album, files = open_dialog(picard_env, state)
+    glue.STATE.pending.clear()
+    back = slot(dlg, "back")
+    # nothing is applied by merely looking; double-clicking the back cover applies just that image
+    assert not glue.STATE.pending
+    dlg.accepted.connect(lambda: accepted.append(True))
+    dlg._apply_now(back, back.grid.all()[0])
+    assert wait_until(lambda: bool(glue.STATE.pending), 20), "double-click apply did not finish"
+    accepted = []
+    assert not accepted  # the window stays open
+    assert dlg.status.text().startswith("CoverUp applied back")
+    plan = next(iter(glue.STATE.pending.values()))
+    assert [it.art_type.value for it in plan.items] == ["back"]  # only the picture that was double-clicked
+    assert back.include.isChecked()
+    assert dlg.apply_btn.isEnabled()  # the rest of the set can still be applied
+    dlg.reject()
+
+
+def test_options_page_has_an_artists_tab_with_its_own_switches(picard_env, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    import coverup
+    from coverup.ui.options_page import _make_options_page_class
+    from picard.plugin3.api import OptionsPage
+
+    monkeypatch.setattr(coverup, "reconfigure_logging", lambda: None)
+    with patch("picard.ui.options.tagger_instance", return_value=MagicMock()):
+        cls = _make_options_page_class(OptionsPage)
+        cls.api = FakeApi(artist_types=["thumb", "logo"], min_artist=800)
+        page = cls()
+    page.load()
+    tabs = [page.tabs.tabText(i) for i in range(page.tabs.count())]
+    assert tabs[:3] == ["General", "Artists", "Sources"]
+    w = page.widgets
+    assert w["artist_art"][1].isChecked() and w["min_artist"][1].value() == 800
+    assert {cb.property("value") for cb in w["artist_types"][1].checks if cb.isChecked()} == {"thumb", "logo"}
+    assert any(PROVIDER for PROVIDER in [page.provider_list.item(i).text() for i in range(page.provider_list.count())] if "Wikimedia" in PROVIDER)
+    # turning artist images off greys out what only matters when they are on
+    w["artist_art"][1].setChecked(False)
+    assert not w["artist_types"][1].isEnabled() and not w["min_artist"][1].isEnabled() and not w["save_artist_art"][1].isEnabled()
+    next(cb for cb in w["artist_types"][1].checks if cb.property("value") == "banner").setChecked(True)
+    page.save()
+    cfg = cls.api.plugin_config
+    assert cfg["artist_art"] is False and set(cfg["artist_types"]) == {"thumb", "logo", "banner"} and cfg["min_artist"] == 800

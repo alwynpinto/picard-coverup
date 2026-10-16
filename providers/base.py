@@ -35,12 +35,20 @@ class Provider:
     def search(self, q: Query) -> list[Candidate]:
         raise NotImplementedError
 
+    def wants_artist_art(self, q: Query) -> bool:
+        """Artist images are on, and this is an album by one artist (not a compilation)."""
+        return bool(self.settings.get("artist_art")) and not is_various(q.artist) and bool(q.artist or q.artist_mbid)
+
 
 _PAREN = re.compile(r"[\(\[].*?[\)\]]")
 _NONWORD = re.compile(r"[^\w\s]+", re.UNICODE)
 _EDITION = re.compile(
     r"\b(deluxe|remaster(ed)?|edition|expanded|anniversary|bonus|version|explicit|clean|mono|stereo)\b", re.IGNORECASE
 )
+
+
+def is_various(artist: str) -> bool:
+    return normalize(artist) in ("various artists", "various", "va")
 
 
 def normalize(text: str) -> str:

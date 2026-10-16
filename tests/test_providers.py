@@ -41,7 +41,7 @@ CAA = {
 
 
 def test_registry_has_all_sources():
-    assert set(REGISTRY) == {"caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "lastfm", "websearch", "local"}
+    assert set(REGISTRY) == {"caa", "discogs", "wikimedia", "fanart", "audiodb", "itunes", "deezer", "lastfm", "websearch", "local"}
 
 
 def test_caa_types_tiers_and_booklet_pages():

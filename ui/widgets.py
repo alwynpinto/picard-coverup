@@ -149,9 +149,19 @@ def card_pixmap(c: Candidate, size: int = THUMB, pick: bool = False) -> QPixmap:
     return pm
 
 
+ARTIST_KIND = {
+    ArtType.ARTIST_THUMB: "Photo",
+    ArtType.ARTIST_LOGO: "Logo",
+    ArtType.ARTIST_BACKGROUND: "Background",
+    ArtType.ARTIST_BANNER: "Banner",
+}
+
+
 def card_text(c: Candidate) -> str:
     extra = ""
-    if c.art_type == ArtType.OTHER:
+    if c.art_type in ARTIST_KIND:
+        extra = f" · {ARTIST_KIND[c.art_type].lower()}"
+    elif c.art_type == ArtType.OTHER:
         extra = " · unlabelled"
     elif c.rejected_reason:
         extra = " · too small" if c.rejected_reason.startswith("Too small") else " · not eligible"

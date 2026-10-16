@@ -44,6 +44,7 @@ class State:
     version: str = "0"
     log_handle: object = None
     pending: dict[str, FolderPlan] = field(default_factory=dict)  # album key -> files to write after save
+    pending_files: dict[int, FolderPlan] = field(default_factory=dict)  # id(File) -> plan, for loose files
     last_batch: dict[str, tuple[str, list[str]]] = field(default_factory=dict)  # album key -> (batch, folders)
     cancel: threading.Event = field(default_factory=threading.Event)
 
@@ -94,6 +95,61 @@ def _classes():
     return Album, Cluster, File, Track
 
 
+class FileGroup:
+    """Loose files from Picard's left pane treated as one album.
+
+    Files under "Unclustered Files" (or picked there) have no album object and Picard cannot show cover art for
+    the "Unclustered Files" node, so CoverUp groups them by their own album tags and applies art file by file.
+    """
+
+    def __init__(self, files):
+        self.files = list(files)
+        self.tracks: list = []
+
+    @property
+    def key(self) -> str:
+        return "files:" + ",".join(str(i) for i in sorted(id(f) for f in self.files))
+
+    @property
+    def id(self) -> str:
+        return self.key
+
+    @property
+    def metadata(self):
+        return self.files[0].metadata
+
+    @property
+    def orig_metadata(self):
+        return self.files[0].orig_metadata
+
+    def iterfiles(self):
+        yield from self.files
+
+    def update(self) -> None:
+        for f in self.files:
+            try:
+                f.update()
+            except Exception:
+                log.debug("File update failed", exc_info=True)
+
+
+def _is_special_cluster(obj) -> bool:
+    return bool(getattr(obj, "special", False)) or getattr(obj, "can_show_coverart", True) is False
+
+
+def _loose_files(obj) -> list:
+    """Files of an object from the left pane that belong to no album and no real cluster."""
+    Album, Cluster, File, Track = _classes()
+    if isinstance(obj, File):
+        parent = obj.parent_item
+        if isinstance(parent, Cluster) and _is_special_cluster(parent):
+            return [obj]
+        return []
+    if isinstance(obj, Cluster) and _is_special_cluster(obj):
+        return list(obj.files)
+    return []
+
+
 def target_of(obj):
     """Album or Cluster that an action on ``obj`` should work on (or None)."""
     Album, Cluster, File, Track = _classes()
@@ -102,28 +158,43 @@ def target_of(obj):
     if isinstance(obj, Track):
         return getattr(obj, "album", None)
     if isinstance(obj, Cluster):
-        return obj
+        return None if _is_special_cluster(obj) else obj
     if isinstance(obj, File):
         parent = obj.parent_item
         if isinstance(parent, Track):
             return getattr(parent, "album", None)
         if isinstance(parent, Cluster):
-            return parent
+            return None if _is_special_cluster(parent) else parent
     return None
 
 
+def _group_loose(files: list) -> list[FileGroup]:
+    groups: dict[tuple, list] = {}
+    for f in files:
+        md = f.metadata
+        key = (md.get("albumartist") or md.get("artist") or "", md.get("album") or "", md.get("musicbrainz_albumid") or "")
+        groups.setdefault(key, []).append(f)
+    return [FileGroup(v) for v in groups.values()]
+
+
 def unique_targets(objs) -> list:
-    out, seen = [], set()
+    out, seen, loose, loose_ids = [], set(), [], set()
     for o in objs:
+        for f in _loose_files(o):
+            if id(f) not in loose_ids:
+                loose_ids.add(id(f))
+                loose.append(f)
         t = target_of(o)
         if t is not None and id(t) not in seen:
             seen.add(id(t))
             out.append(t)
-    return out
+    return out + _group_loose(loose)
 
 
 def key_of(target) -> str:
     Album, Cluster, _F, _T = _classes()
+    if isinstance(target, FileGroup):
+        return target.key
     if isinstance(target, Album):
         return f"album:{target.id}"
     return f"cluster:{id(target)}"
@@ -144,20 +215,28 @@ def _int(v, default=None):
 
 
 def query_from(target) -> Query:
-    md = target.metadata
     files = list(iter_files(target))
     dirs = []
     for f in files:
         d = os.path.dirname(f.filename)
         if d and d not in dirs:
             dirs.append(d)
+    disc_numbers = {disc_for_track(f.metadata.get("discnumber")) for f in files} or {1}
+    return query_from_metadata(
+        target.metadata, dirs=dirs, disc_numbers=disc_numbers,
+        track_fallback=len(getattr(target, "tracks", []) or files),
+    )
+
+
+def query_from_metadata(md, dirs=(), disc_numbers=frozenset({1}), track_fallback: int = 0, release: dict | None = None) -> Query:
+    """A search query from Picard metadata (an album, a cluster, loose files, or a release being loaded)."""
     year = None
     for k in ("date", "originaldate"):
         if md.get(k):
             year = _int(md[k][:4])
             if year:
                 break
-    disc_numbers = {disc_for_track(f.metadata.get("discnumber")) for f in files} or {1}
+    media = (release or {}).get("media") or []
     q = Query(
         artist=md.get("albumartist") or md.get("artist") or "",
         album=md.get("album") or "",
@@ -167,14 +246,14 @@ def query_from(target) -> Query:
         label=md.get("label") or "",
         country=md.get("releasecountry") or "",
         format=md.get("media") or "",
-        medium_count=max(_int(md.get("totaldiscs"), 1) or 1, max(disc_numbers)),
+        medium_count=max(_int(md.get("totaldiscs"), 1) or 1, max(disc_numbers), len(media)),
         release_mbid=md.get("musicbrainz_albumid") or "",
         rg_mbid=md.get("musicbrainz_releasegroupid") or "",
         artist_mbid=(md.getall("musicbrainz_albumartistid") or [""])[0] if hasattr(md, "getall") else md.get("musicbrainz_albumartistid", ""),
         genre=(md.get("genre") or "").split(";")[0].strip(),
         comment=md.get("~releasecomment") or "",
-        track_count=_int(md.get("~totalalbumtracks") or md.get("totaltracks"), 0) or len(getattr(target, "tracks", []) or files),
-        album_dirs=dirs,
+        track_count=_int(md.get("~totalalbumtracks") or md.get("totaltracks"), 0) or track_fallback,
+        album_dirs=list(dirs),
     )
     return q
 
@@ -222,6 +301,17 @@ def _strip_types(obj, types: set[str]) -> None:
                 del images[i]
 
 
+def _set_art(target, img) -> None:
+    """Attach an image to an album or cluster, or file by file for loose files and nodes that cannot show art."""
+    from picard.coverart.setters import CoverArtSetter, CoverArtSetterMode
+
+    if isinstance(target, FileGroup) or getattr(target, "can_show_coverart", True) is False:
+        for f in iter_files(target):
+            CoverArtSetter(CoverArtSetterMode.APPEND, img, f).set_coverart()
+    else:
+        CoverArtSetter(CoverArtSetterMode.APPEND, img, target).set_coverart()
+
+
 def embed(target, items: list[PlanItem], s: Settings) -> list[str]:
     """Attach images to the album/cluster (and per-disc to that disc's files). Saved by Picard on save."""
     from picard.coverart.setters import CoverArtSetter, CoverArtSetterMode
@@ -239,7 +329,8 @@ def embed(target, items: list[PlanItem], s: Settings) -> list[str]:
             if it.art_type != ArtType.DISC:
                 album_types.update(PICARD_TYPES[it.art_type])
         if album_types:
-            for o in [target] + list(getattr(target, "tracks", [])) + list(iter_files(target)):
+            holders = [] if isinstance(target, FileGroup) else [target]
+            for o in holders + list(getattr(target, "tracks", [])) + list(iter_files(target)):
                 _strip_types(o, album_types)
         # disc art is replaced only on the discs that get new disc art
         for d in {it.disc_number or 1 for it in embeddable if it.art_type == ArtType.DISC}:
@@ -261,7 +352,7 @@ def embed(target, items: list[PlanItem], s: Settings) -> list[str]:
                 CoverArtSetter(CoverArtSetterMode.APPEND, img, f).set_coverart()
             log.info("Embedded disc %s art (%dx%d) into %d file(s)", it.disc_number, w, h, len(targets))
         else:
-            CoverArtSetter(CoverArtSetterMode.APPEND, img, target).set_coverart()
+            _set_art(target, img)
             log.info("Embedded %s (%dx%d, %s) into %s", it.art_type.value, w, h, c.provider, getattr(target, "id", "cluster"))
     return notes
 
@@ -290,6 +381,9 @@ def schedule_files(target, items: list[PlanItem], s: Settings) -> FolderPlan | N
     plan = FolderPlan(file_items, s, batch)
     key = key_of(target)
     STATE.pending[key] = plan
+    if isinstance(target, FileGroup):
+        for f in target.files:
+            STATE.pending_files[id(f)] = plan
     log.info("Scheduled %d file(s) for %s (%s)", len(file_items), key, s["write_files_when"])
     if s["write_files_when"] == "immediately":
         write_now(target, plan)
@@ -326,12 +420,12 @@ def on_file_saved(api, file) -> None:
         Album, Cluster, File, Track = _classes()
         parent = file.parent_item
         target = parent.album if isinstance(parent, Track) else parent
-        if target is None:
-            return
-        key = key_of(target)
-        plan = STATE.pending.get(key)
+        key = key_of(target) if target is not None else ""
+        plan = STATE.pending.get(key) or STATE.pending_files.get(id(file))
         if plan is None:
             return
+        if not key:
+            key = next((k for k, p in STATE.pending.items() if p is plan), "")
         folder = os.path.dirname(file.filename)
         plan.write_for_folder(folder, disc_for_track(file.metadata.get("discnumber")), imaging.prepare)
         _remember_batch(key, plan, [folder])
@@ -376,13 +470,17 @@ def undo_last(target) -> list[str]:
     return messages
 
 
-def set_status_variables(target, status: str, front: Candidate | None) -> None:
-    values = {
+def status_values(status: str, front: Candidate | None) -> dict[str, str]:
+    return {
         "_coverup_status": status,
         "_coverup_source": front.provider if front else "",
         "_coverup_confidence": front.tier.value if front else "",
         "_coverup_generated": "1" if (front and front.generated) else "",
     }
+
+
+def set_status_variables(target, status: str, front: Candidate | None) -> None:
+    values = status_values(status, front)
     objs = [target] + list(getattr(target, "tracks", [])) + list(iter_files(target))
     for o in objs:
         md = getattr(o, "metadata", None)
@@ -393,6 +491,28 @@ def set_status_variables(target, status: str, front: Candidate | None) -> None:
                 md[k] = v
             elif k in md:
                 del md[k]
+
+
+def notify(message: str) -> None:
+    """Show a short message in Picard's status bar (best effort)."""
+    try:
+        STATE.api.tagger.window.set_statusbar_message(message, echo=None, timeout=15000)
+    except Exception:
+        log.debug("Status bar message not shown: %s", message)
+
+
+def describe_apply(target, items: list[PlanItem], s: Settings, embed_on: bool, files_on: bool) -> str:
+    """One plain sentence on what an apply did and what is still waiting for Picard's Save."""
+    kinds = sorted({it.art_type.value for it in items})
+    n_files = len(list(iter_files(target)))
+    parts = []
+    embedded = sorted({it.art_type.value for it in items if it.art_type in s.embed_art_types()}) if embed_on else []
+    if embedded:
+        parts.append(f"{' and '.join(embedded)} embedded in {n_files} file{'s' if n_files != 1 else ''} (written to the tags when you save)")
+    if files_on:
+        when = "now" if s["write_files_when"] == "immediately" else "when you save in Picard"
+        parts.append(f"{len(items)} image file{'s' if len(items) != 1 else ''} will be written {when}")
+    return "CoverUp applied " + ", ".join(kinds) + ": " + "; ".join(parts) + "." if parts else "CoverUp: nothing to apply."
 
 
 def apply_plan(target, items: list[PlanItem], s: Settings, embed_on: bool, files_on: bool, status: str = "applied") -> list[str]:
@@ -409,6 +529,7 @@ def apply_plan(target, items: list[PlanItem], s: Settings, embed_on: bool, files
         target.update()
     except Exception:
         pass
+    notify(describe_apply(target, items, s, embed_on, files_on))
     return notes
 
 

@@ -71,12 +71,31 @@ LAYOUT: dict[str, list[tuple]] = {
         ("collision_policy", "Existing files", "choice", C(("if_better", "Replace only if the new image is larger"), ("overwrite", "Always replace"), ("skip", "Keep the existing file"), ("keep_both", "Keep both")), None),
         ("backups", "Keep a backup of replaced files so Undo can restore them", "bool", None, None),
     ],
+    "Artists": [
+        (H, "Artist images"),
+        ("artist_art", "Look for artist images when I search for an album", "bool", None,
+         "Photos come from Wikimedia Commons (through the artist's MusicBrainz links), Discogs (needs your token), Deezer, Fanart.tv and TheAudioDB. "
+         "Logos, backgrounds and banners come from Fanart.tv (free key) and TheAudioDB. Tick or reorder sources under Sources. "
+         "Compilations (Various Artists) never get artist images."),
+        ("artist_types", "Pre-select", "multi", C(("thumb", "Photo"), ("logo", "Logo"), ("background", "Background"), ("banner", "Banner")),
+         "Ticked kinds are pre-selected in the review window and used by Auto-apply when Artist images is ticked under General. "
+         "The review window lists every kind that was found, so you can still pick the others by hand."),
+        ("min_artist", "Smallest photo", "int", (0, 5000, " px"), "Smaller photos are hidden in the review window and never applied automatically."),
+        (H, "Where it goes"),
+        ("save_artist_art", "Save artist images in the artist folder (the folder above the album)", "bool", None,
+         "For example Music/Artist/artist.jpg. Players and media servers read it from there. Several albums share it, so the larger image wins unless you set Existing files (General) otherwise."),
+        (H, "File names (when File names under General is My own)"),
+        ("name_artist_thumb", "Photo", "text", None, None),
+        ("name_artist_logo", "Logo", "text", None, None),
+        ("name_artist_background", "Background", "text", None, None),
+        ("name_artist_banner", "Banner", "text", None, None),
+    ],
     "Sources": [
         (H, "Where to look"),
         ("providers", "", "providers", None, "Tick the sources to search and drag to change the order. Cover Art Archive, TheAudioDB, Apple Music and Deezer need no key."),
         (H, "Keys"),
         ("discogs_token", "Discogs token", "password", None, "Discogs: Settings > Developers > Generate new token. Finds the exact pressing you tagged."),
-        ("fanart_api_key", "Fanart.tv key", "password", None, "Free from fanart.tv/get-an-api-key. Adds disc art, artist images and band logos."),
+        ("fanart_api_key", "Fanart.tv key", "password", None, "Free from fanart.tv/get-an-api-key. Adds disc art, artist photos, band logos, backgrounds and banners."),
         ("fanart_client_key", "Fanart.tv personal key", "password", None, "Optional. New uploads appear sooner."),
         ("audiodb_api_key", "TheAudioDB key", "text", None, "123 is the free public key. A personal key is faster."),
         ("lastfm_api_key", "Last.fm key", "password", None, "Optional. Last.fm images are usually small."),
@@ -94,7 +113,6 @@ LAYOUT: dict[str, list[tuple]] = {
         ("min_back", "Back", "int", (0, 5000, " px"), None),
         ("min_disc", "Disc", "int", (0, 5000, " px"), None),
         ("min_booklet", "Booklet", "int", (0, 5000, " px"), None),
-        ("min_artist", "Artist", "int", (0, 5000, " px"), None),
         (H, "When applying"),
         ("apply_min_side", "Never apply below", "int", (0, 5000, " px"), "A low-resolution cover is not applied automatically; it can trigger Create instead."),
         ("embed_max_side", "Embedded images up to", "int", (0, 10000, " px"), "Larger images are scaled down for the tags only."),
@@ -138,7 +156,6 @@ LAYOUT: dict[str, list[tuple]] = {
         ("max_file_mb", "Largest download", "int", (1, 200, " MB"), None),
         (H, "Files and tags"),
         ("multi_folder", "Albums split into CD1, CD2 folders", "radio", C(("every", "Album art in every folder"), ("first", "Album art in the first folder only")), None),
-        ("save_artist_art", "Save artist images in the folder above the album", "bool", None, None),
         ("replace_embedded", "Remove older embedded images of the same type", "bool", None, None),
         ("record_source_in_comment", "Note the source in the embedded image's comment", "bool", None, None),
         ("write_sidecar", "Write coverup.json describing where each file came from", "bool", None, None),
@@ -147,10 +164,6 @@ LAYOUT: dict[str, list[tuple]] = {
         ("name_back", "Back", "text", None, None),
         ("name_disc", "Disc", "text", None, "{discnumber} becomes 1, 2, …"),
         ("name_booklet", "Booklet page", "text", None, "{n} becomes 01, 02, …"),
-        ("name_artist_thumb", "Artist photo", "text", None, None),
-        ("name_artist_logo", "Artist logo", "text", None, None),
-        ("name_artist_background", "Artist background", "text", None, None),
-        ("name_artist_banner", "Artist banner", "text", None, None),
         (H, "Network"),
         ("http_cache_hours", "Remember search results for", "int", (0, 720, " hours"), None),
         ("max_candidates_per_provider", "Results per source", "int", (1, 50, ""), None),
@@ -280,6 +293,7 @@ def _make_options_page_class(base):
             self.widgets["websearch_engine"][1].group.buttonToggled.connect(self._update_enabled)
             self.widgets["prefer_largest"][1].group.buttonToggled.connect(self._update_enabled)
             self.widgets["creative_template"][1].currentIndexChanged.connect(self._update_enabled)
+            self.widgets["artist_art"][1].toggled.connect(self._update_enabled)
 
         # ---- building ----
         def _add_field(self, form: QFormLayout, key, label, kind, opt, help_text) -> None:
@@ -437,6 +451,9 @@ def _make_options_page_class(base):
             for k in ("log_max_mb", "log_backups", "log_total_cap_mb", "log_retain_days", "log_sessions_keep"):
                 self._show(k, k in LOG_FIELDS.get(mode, set()))
             self._show("websearch_google_cx", self.widgets["websearch_engine"][1].value() == "google")
+            artist_on = self.widgets["artist_art"][1].isChecked()
+            for k in ("artist_types", "min_artist", "save_artist_art"):
+                self._show(k, artist_on)
             self._show("target_size", self.widgets["prefer_largest"][1].value() is False)
             self._show("creative_custom_prompt", self.widgets["creative_template"][1].currentData() == "custom")
             ai_on = self.widgets["ai_backend"][1].currentData() != "none"

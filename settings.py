@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 from .model import ArtType
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 # Defaults that changed between settings versions: (version introduced, key, old default, new default).
 # A user still on the old default gets the new one; anything they chose themselves is kept.
@@ -28,6 +28,10 @@ CHANGED_DEFAULTS = [
     (2, "min_disc", 300, 500),
     (2, "min_booklet", 300, 500),
     (2, "min_artist", 300, 500),
+    # 3: artist photos are collected by default, and Wikimedia Commons (no key) is searched
+    (3, "apply_types", ["front", "back", "disc", "booklet"], ["front", "back", "disc", "booklet", "artist"]),
+    (3, "providers_enabled", ["caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "local"],
+     ["caa", "discogs", "wikimedia", "fanart", "audiodb", "itunes", "deezer", "local"]),
 ]
 
 # Embed choices offered in the dialog and options
@@ -39,11 +43,12 @@ EMBED_CHOICES = [
 ]
 
 # Provider ids, in default query order
-PROVIDERS = ("caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "lastfm", "websearch", "local")
+PROVIDERS = ("caa", "discogs", "wikimedia", "fanart", "audiodb", "itunes", "deezer", "lastfm", "websearch", "local")
 
 PROVIDER_LABELS = {
     "caa": "Cover Art Archive (MusicBrainz)",
     "discogs": "Discogs",
+    "wikimedia": "Wikimedia Commons (artist photos and logos, no key)",
     "fanart": "Fanart.tv",
     "audiodb": "TheAudioDB",
     "itunes": "Apple Music (iTunes)",
@@ -66,7 +71,7 @@ SECRET_KEYS = (
 
 DEFAULTS: dict[str, Any] = {
     # ---- sources ----
-    "providers_enabled": ["caa", "discogs", "fanart", "audiodb", "itunes", "deezer", "local"],
+    "providers_enabled": ["caa", "discogs", "wikimedia", "fanart", "audiodb", "itunes", "deezer", "local"],
     "provider_order": list(PROVIDERS),
     "discogs_token": "",
     "fanart_api_key": "",
@@ -83,7 +88,9 @@ DEFAULTS: dict[str, Any] = {
     "conflict_min_sources": 3,
     "auto_apply_mode": "confident",  # confident | never
     # ---- art types ----
-    "apply_types": ["front", "back", "disc", "booklet"],  # collected by default (dialog and auto-apply)
+    "apply_types": ["front", "back", "disc", "booklet", "artist"],  # collected by default (dialog and auto-apply)
+    "artist_art": True,  # look for artist images at all
+    "artist_types": ["thumb"],  # which artist images are pre-selected: thumb | logo | background | banner
     # ---- resolution (search limits, per type) ----
     "min_front": 500,
     "min_back": 500,
@@ -208,6 +215,12 @@ ART_TYPE_NAME_KEY = {
 }
 
 ARTIST_TYPES = (ArtType.ARTIST_THUMB, ArtType.ARTIST_LOGO, ArtType.ARTIST_BACKGROUND, ArtType.ARTIST_BANNER)
+ARTIST_TYPE_KEYS = {
+    "thumb": ArtType.ARTIST_THUMB,
+    "logo": ArtType.ARTIST_LOGO,
+    "background": ArtType.ARTIST_BACKGROUND,
+    "banner": ArtType.ARTIST_BANNER,
+}
 
 # What "artist" means in the type checklist
 TYPE_GROUPS = {
@@ -266,10 +279,19 @@ class Settings:
             return NAMING_PRESETS[preset][key]
         return str(self.values.get(key) or DEFAULTS[key])
 
+    def artist_art_types(self) -> set[ArtType]:
+        """Artist image kinds that are pre-selected (empty when artist images are switched off)."""
+        if not self.values.get("artist_art"):
+            return set()
+        return {ARTIST_TYPE_KEYS[k] for k in self.values.get("artist_types") or [] if k in ARTIST_TYPE_KEYS}
+
     def apply_art_types(self) -> set[ArtType]:
         out: set[ArtType] = set()
         for group in self.values["apply_types"]:
-            out.update(TYPE_GROUPS.get(group, ()))
+            if group == "artist":
+                out.update(self.artist_art_types())
+            else:
+                out.update(TYPE_GROUPS.get(group, ()))
         return out
 
     def embed_art_types(self) -> set[ArtType]:

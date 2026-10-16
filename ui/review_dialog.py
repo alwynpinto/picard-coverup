@@ -82,8 +82,10 @@ EMPTY_TEXT = {
     "back": "No back cover was found. Add a scan from a file or a web address.",
     "disc": "No art was found for this disc. Add a scan from a file or a web address.",
     "booklet": "No booklet pages were found. Add scans from files or web addresses.",
-    "artist": "No artist images were found. Fanart.tv and TheAudioDB provide them (Fanart.tv needs a free key).",
+    "artist": "No artist images were found. Photos come from Wikimedia Commons, Deezer, Discogs, Fanart.tv and TheAudioDB; "
+    "logos, backgrounds and banners from Fanart.tv (free key) and TheAudioDB. See Options > CoverUp > Artists.",
 }
+ARTIST_OFF_TEXT = "Artist images are switched off. Turn them on under Options > CoverUp > Artists."
 
 
 def _h(text: str, scale: float = 1.0, bold: bool = False) -> QLabel:
@@ -116,6 +118,7 @@ class ReviewDialog(QDialog):
         self.current = glue.existing_front(target)
         self.slots: list[Slot] = []
         self.generated: list[Candidate] = []
+        self._busy_applying = False
         self.setWindowTitle(f"CoverUp: {self.query.album or 'Album'}")
         self.resize(1180, 820)
         self._build()
@@ -373,15 +376,18 @@ class ReviewDialog(QDialog):
             lay.setContentsMargins(0, 6, 0, 0)
             slot.grid = CandidateGrid(multi=slot.multi)
             slot.grid.itemSelectionChanged.connect(lambda s=slot: self._grid_changed(s))
+            slot.grid.itemDoubleClicked.connect(lambda item, s=slot: self._apply_now(s, item.data(Qt.ItemDataRole.UserRole)))
             slot.grid.currentItemChanged.connect(lambda cur, _prev: self.preview.show_candidate(cur.data(Qt.ItemDataRole.UserRole) if cur else None))
-            slot.empty = _muted(EMPTY_TEXT[slot.group])
+            slot.empty = _muted(EMPTY_TEXT[slot.group] if slot.group != "artist" or self.s["artist_art"] else ARTIST_OFF_TEXT)
             slot.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             slot.stack = QStackedWidget()
             slot.stack.addWidget(slot.grid)
             slot.stack.addWidget(slot.empty)
             lay.addWidget(slot.stack)
+            hint = "Click a picture to choose it; double-click to apply it straight away."
             if slot.multi:
-                lay.addWidget(_muted("Select every image you want; click again to remove one."))
+                hint = "Select every image you want (click again to remove one); double-click one to apply just that image now."
+            lay.addWidget(_muted(hint))
             self.tabs.addTab(page, slot.title)
             tile_col = QVBoxLayout()
             tile_col.setSpacing(2)
@@ -435,7 +441,8 @@ class ReviewDialog(QDialog):
             elif slot.group == "booklet":
                 slot.chosen = list(res.booklet)
             else:
-                slot.chosen = [c for c in res.artist.values() if c]
+                kinds = self.s.artist_art_types()
+                slot.chosen = [c for art, c in res.artist.items() if c and art in kinds]
 
     def _refresh_slot(self, slot: Slot) -> None:
         pool = self._pool(slot)
@@ -881,9 +888,33 @@ class ReviewDialog(QDialog):
 
     # ===================================================================================== apply
     def _apply(self) -> None:
-        if not self.apply_btn.isEnabled():
+        if not self.apply_btn.isEnabled() or self._busy_applying:
             return
-        items = self.chosen_items()
+        self._apply_items(self.chosen_items(), close=True)
+
+    def _item_for(self, slot: Slot, c: Candidate) -> PlanItem:
+        if slot.group == "disc":
+            return PlanItem(ArtType.DISC, c, disc_number=slot.disc)
+        if slot.group == "booklet":
+            return PlanItem(ArtType.BOOKLET, c, page=c.page or 1)
+        if slot.group == "artist":
+            return PlanItem(c.art_type, c)
+        return PlanItem(slot.art_type, c)
+
+    def _apply_now(self, slot: Slot, c: Candidate | None) -> None:
+        """Double-click on a picture: choose it and apply that one image straight away, keeping the window open."""
+        if c is None or self.result is None or self._busy_applying:
+            return
+        for i in range(slot.grid.count()):
+            item = slot.grid.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) is c:
+                item.setSelected(True)
+        slot.include.setChecked(True)
+        self._apply_items([self._item_for(slot, c)], close=False)
+
+    def _apply_items(self, items: list[PlanItem], close: bool) -> None:
+        if not items:
+            return
         try:
             dest = self._destination()
         except ValueError as exc:
@@ -891,8 +922,12 @@ class ReviewDialog(QDialog):
             return
         s = self.s.with_(**dest)
         embed_on, files_on = bool(dest["embed"]), bool(dest["save_files"])
+        if not embed_on and not files_on:
+            QMessageBox.information(self, "CoverUp", "Choose where the image goes first: embed it in the tags or save it as a file.")
+            return
+        self._busy_applying = True
         self.apply_btn.setEnabled(False)
-        self.status.setText("Downloading the full-size images…")
+        self.status.setText("Downloading the full-size image…" if len(items) == 1 else "Downloading the full-size images…")
         pipeline = self.pipeline
 
         def work():
@@ -902,15 +937,26 @@ class ReviewDialog(QDialog):
             return items
 
         def done(_result, error):
+            self._busy_applying = False
             if error is not None:
-                self.apply_btn.setEnabled(True)
+                self._update_summary()
                 self.status.setText(f"Downloading failed ({error}). Nothing was applied.")
                 return
             notes = glue.apply_plan(self.target, items, s, embed_on, files_on, status="applied")
             log.info("Applied by the user: %s (embed=%s, files=%s)", ", ".join(sorted({i.art_type.value for i in items})), embed_on, files_on)
+            message = glue.describe_apply(self.target, items, s, embed_on, files_on)
             if notes:
                 QMessageBox.information(self, "CoverUp", "\n".join(notes))
-            self.accept()
+            if close:
+                self.accept()
+                return
+            self._update_summary()
+            self.status.setText(message)
+            front = next((it.candidate for it in items if it.art_type == ArtType.FRONT), None)
+            if front is not None:
+                self.current = front
+                self.preview.current = front
+                self.cover.setPixmap(self._tile_pixmap(front, 72, "No cover"))
 
         run_in_background(work, done)
 

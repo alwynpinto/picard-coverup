@@ -129,6 +129,6 @@ class FanartTv(Provider):
         out: list[Candidate] = []
         if is_mbid(q.rg_mbid):
             out += parse_album(self._get(f"albums/{q.rg_mbid}"), q.rg_mbid)
-        if is_mbid(q.artist_mbid):
+        if is_mbid(q.artist_mbid) and self.wants_artist_art(q):
             out += parse_artist(self._get(q.artist_mbid))
         return out

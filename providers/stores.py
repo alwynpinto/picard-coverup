@@ -9,7 +9,7 @@ import urllib.parse
 
 from ..model import ArtType, Candidate, Query, Tier
 from ..net import HttpError
-from .base import Provider, matches
+from .base import Provider, matches, similarity
 from .musicbrainz import is_mbid
 
 
@@ -45,13 +45,41 @@ class Deezer(Provider):
     ID = "deezer"
     NAME = "Deezer"
     SEARCH = "https://api.deezer.com/search/album?{q}"
+    ARTIST_SEARCH = "https://api.deezer.com/search/artist?{q}"
 
     def search(self, q: Query) -> list[Candidate]:
-        if not q.album:
-            return []
-        query = f'artist:"{q.artist}" album:"{q.album}"' if q.artist else q.album
-        url = self.SEARCH.format(q=urllib.parse.urlencode({"q": query, "limit": 15}))
-        return parse_deezer(self.http.get_json(url), q)[: self.limit]
+        out: list[Candidate] = []
+        if q.album:
+            query = f'artist:"{q.artist}" album:"{q.album}"' if q.artist else q.album
+            url = self.SEARCH.format(q=urllib.parse.urlencode({"q": query, "limit": 15}))
+            out += parse_deezer(self.http.get_json(url), q)[: self.limit]
+        if q.artist and self.wants_artist_art(q):
+            try:
+                url = self.ARTIST_SEARCH.format(q=urllib.parse.urlencode({"q": q.artist, "limit": 5}))
+                out += parse_deezer_artist(self.http.get_json(url), q)
+            except HttpError as exc:
+                self.log.warning("Deezer artist search failed: %s", exc)
+        return out
+
+
+def parse_deezer_artist(payload: dict, q: Query) -> list[Candidate]:
+    """Deezer's artist photo (1000 x 1000) when a hit has the same name (tier C: matched by name only)."""
+    for r in (payload or {}).get("data") or []:
+        name = r.get("name", "")
+        sim = similarity(q.artist, name)
+        url = r.get("picture_xl") or ""
+        # artists without a photo get a grey placeholder whose address has an empty image hash
+        if sim < 0.95 or not url or "/artist//" in url:
+            continue
+        c = Candidate(
+            "deezer", f"artist:{r.get('id')}", url, ArtType.ARTIST_THUMB, Tier.C,
+            width=1000, height=1000, dims_known=True, thumb_url=r.get("picture_medium") or url, attribution="Deezer",
+        )
+        c.type_confidence = sim * 0.9
+        c.likes = int(r.get("nb_fan") or 0)
+        c.comment = f"Deezer artist: {name}"
+        return [c]
+    return []
 
 
 def parse_deezer(payload: dict, q: Query) -> list[Candidate]:
