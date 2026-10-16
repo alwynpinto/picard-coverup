@@ -206,8 +206,13 @@ def test_search_menu_paste_and_drop(picard_env, state, monkeypatch):
     menu.aboutToShow.emit()
     labels = [a.text() for a in menu.actions() if a.text()]
     assert labels[0] == "Google Images: large" and "Edit the search words…" in labels
+    shops = [a for a in menu.actions() if a.text() == "Shops and streaming"][0].menu()
+    assert [a.text() for a in shops.actions()][:3] == ["Amazon", "Spotify", "Tidal"]
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
+    shops.actions()[1].trigger()
+    assert opened[-1].startswith("https://open.spotify.com/search/") and "Album" in opened[-1]
+    opened.clear()
     menu.actions()[0].trigger()
     assert opened and "tbm=isch" in opened[0] and "Album" in opened[0]
     assert "Ctrl+V" in dlg.status.text()

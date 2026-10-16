@@ -3,7 +3,7 @@
 import urllib.parse
 
 from coverup.model import Query
-from coverup.searchlinks import base_title, edition_words, links, search_terms, unwrap_image_url
+from coverup.searchlinks import base_title, edition_words, links, search_terms, store_links, store_terms, unwrap_image_url
 
 Q = Query(artist="The Beatles", album="Abbey Road (Remastered 2009)", year=1969, label="Apple Records",
           catalog_number="PCS 7088", format="12\" Vinyl", comment="2009 stereo remaster", release_mbid="m-1", discogs_release_id=123)
@@ -57,3 +57,13 @@ def test_unwrap_search_result_links():
     b = "https://www.bing.com/images/search?view=detailV2&mediaurl=https%3A%2F%2Fcdn.x%2Fb.png"
     assert unwrap_image_url(b) == "https://cdn.x/b.png"
     assert unwrap_image_url(" https://example.com/c.jpg ") == "https://example.com/c.jpg"
+
+
+def test_store_links_use_plain_artist_and_title():
+    assert store_terms(Q) == "The Beatles Abbey Road"
+    assert store_terms(Query(artist="Various Artists", album="Now 50")) == "Now 50"
+    got = dict(store_links(Q))
+    assert set(got) == {"Amazon", "Spotify", "Tidal", "Apple Music", "YouTube Music", "Bandcamp", "Qobuz"}
+    assert got["Spotify"] == "https://open.spotify.com/search/The%20Beatles%20Abbey%20Road/albums"
+    assert got["Tidal"] == "https://tidal.com/search?q=The+Beatles+Abbey+Road"
+    assert all(u.startswith("https://") for u in got.values())

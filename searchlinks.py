@@ -94,6 +94,29 @@ def links(q: Query) -> list[tuple[str, str]]:
     return out
 
 
+def store_terms(q: Query) -> str:
+    """Plain 'artist title' text for store and streaming searches, which match worse with quotes, years or edition words."""
+    artist = "" if (q.artist or "").lower() in ("various artists", "various") else (q.artist or "")
+    return " ".join(x for x in (artist, base_title(q.album)) if x)
+
+
+def store_links(q: Query) -> list[tuple[str, str]]:
+    """(label, URL) pairs for shops and streaming services. Their pages show the cover art they hold;
+    open the cover full size and paste or drag it back. Opened in the browser only, never fetched."""
+    t = store_terms(q)
+    plus = urllib.parse.quote_plus(t)
+    path = urllib.parse.quote(t, safe="")
+    return [
+        ("Amazon", f"https://www.amazon.com/s?k={plus}&i=popular"),
+        ("Spotify", f"https://open.spotify.com/search/{path}/albums"),
+        ("Tidal", f"https://tidal.com/search?q={plus}"),
+        ("Apple Music", f"https://music.apple.com/search?term={plus}"),
+        ("YouTube Music", f"https://music.youtube.com/search?q={plus}"),
+        ("Bandcamp", f"https://bandcamp.com/search?q={plus}&item_type=a"),
+        ("Qobuz", f"https://www.qobuz.com/search?q={plus}"),
+    ]
+
+
 _WRAPPED = (("imgurl", "google.", "/imgres"), ("mediaurl", "bing.com", "/images/search"), ("u", "duckduckgo.com", "/iu"))
 
 

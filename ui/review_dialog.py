@@ -49,7 +49,7 @@ from ..creative.template_engine import CUSTOM, load_templates
 from ..imageinfo import probe
 from ..model import ArtType, Candidate, Tier
 from ..pipeline import AlbumResult, PlanItem
-from ..searchlinks import links, search_terms, unwrap_image_url
+from ..searchlinks import links, search_terms, store_links, unwrap_image_url
 from ..settings import ARTIST_TYPES, EMBED_CHOICES
 from .widgets import SOURCE_NAMES, CandidateGrid, Preview, image_of, run_in_background
 
@@ -731,6 +731,12 @@ class ReviewDialog(QDialog):
         menu.clear()
         for label, url in links(self.query):
             act = menu.addAction(label)
+            act.setToolTip(url)
+            act.triggered.connect(lambda _checked=False, u=url: self._open_search(u))
+        shops = menu.addMenu("Shops and streaming")
+        shops.setToolTipsVisible(True)
+        for label, url in store_links(self.query):
+            act = shops.addAction(label)
             act.setToolTip(url)
             act.triggered.connect(lambda _checked=False, u=url: self._open_search(u))
         menu.addSeparator()
