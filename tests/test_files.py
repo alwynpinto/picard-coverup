@@ -114,3 +114,23 @@ def test_undo_restores_backup_and_removes_new_files(tmp_path):
     assert len(out) == 2
     assert p.read_bytes() == b"old" and not (tmp_path / "back.jpg").exists()
     assert f.undo_last(tmp_path, 1) == []
+
+
+def test_written_files_are_readable_by_other_users(tmp_path):
+    """mkstemp() makes 0600 files; media servers running as another user must still read the art."""
+    import os
+    import stat
+
+    old_umask = os.umask(0o022)
+    try:
+        new = tmp_path / "cover.jpg"
+        f.safe_write(new, b"x" * 10)
+        assert stat.S_IMODE(new.stat().st_mode) == 0o644
+
+        existing = tmp_path / "folder.jpg"
+        existing.write_bytes(b"old")
+        existing.chmod(0o664)
+        f.safe_write(existing, b"y" * 10, policy=f.OVERWRITE)
+        assert stat.S_IMODE(existing.stat().st_mode) == 0o664
+    finally:
+        os.umask(old_umask)

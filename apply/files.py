@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import time
 from dataclasses import dataclass
@@ -106,6 +107,21 @@ class WriteResult:
     reason: str = ""
 
 
+def _new_file_mode() -> int:
+    """Permissions an ordinary new file gets (0o666 minus the process umask).
+
+    Read from /proc instead of os.umask(), which can only be read by setting
+    it and is process-wide (CoverUp writes from Picard's worker threads)."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("Umask:"):
+                    return 0o666 & ~int(line.split()[1], 8)
+    except (OSError, ValueError):
+        pass
+    return 0o644
+
+
 def _unique_path(path: Path) -> Path:
     for i in range(2, 1000):
         cand = path.with_name(f"{path.stem}-{i}{path.suffix}")
@@ -173,6 +189,15 @@ def safe_write(
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
+        # mkstemp() creates the file 0600 (owner only). Without this, every
+        # image CoverUp saves is unreadable to media servers running as
+        # another user (Plex, Jellyfin, Navidrome, Lyrion on a NAS). A
+        # replaced file keeps the permissions it had.
+        try:
+            mode = stat.S_IMODE(os.stat(target).st_mode) if target.exists() else _new_file_mode()
+            os.chmod(tmp, mode)
+        except OSError:
+            pass  # e.g. a share that does not support chmod; keep going
         os.replace(tmp, target)
     except BaseException:
         try:
