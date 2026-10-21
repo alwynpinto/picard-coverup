@@ -18,22 +18,26 @@ SUBFOLDERS = ("covers", "cover", "art", "artwork", "artworks", "scans", "booklet
 MAX_LOCAL = 60
 SKIP_DIRS = {".coverup-backup"}
 
-_FRONT = re.compile(r"^(cover|folder|front|album|albumart|albumartsmall)\b", re.IGNORECASE)
-_BACK = re.compile(r"^(back|rear|backcover|back-cover)\b", re.IGNORECASE)
-_DISC = re.compile(r"^(disc|disk|cd|cdart|vinyl|medium)\s*[-_ ]?\s*(\d+)?", re.IGNORECASE)
-_BOOKLET = re.compile(r"^(booklet|inlay|insert|tray|inside|scan|page)", re.IGNORECASE)
+_WORDS = re.compile(r"[a-z]+|\d+")
+_BACK = {"back", "rear", "backcover"}
+_DISC = {"disc", "disk", "cd", "cdart", "vinyl", "medium", "label"}
+_BOOKLET = {"booklet", "inlay", "insert", "tray", "inside", "scan", "page", "pages"}
+_FRONT = {"cover", "folder", "front", "album", "albumart", "albumartsmall", "frontcover"}
 
 
 def classify(name: str) -> tuple[ArtType, int | None]:
+    """Guess the art type from any word in the file name ('Leonard - Front.jpg', 'scan_back_2.png')."""
     stem = Path(name).stem
-    if _BACK.match(stem):
+    words = _WORDS.findall(stem.lower())
+    wordset = set(words)
+    if wordset & _BACK:
         return ArtType.BACK, None
-    m = _DISC.match(stem)
-    if m:
-        return ArtType.DISC, int(m.group(2)) if m.group(2) else parse_disc_number(stem)
-    if _BOOKLET.match(stem):
+    if wordset & _DISC:
+        m = re.search(r"(?:disc|disk|cd|cdart|vinyl|medium)\s*[-_ ]?\s*(\d+)", stem, re.IGNORECASE)
+        return ArtType.DISC, int(m.group(1)) if m else parse_disc_number(stem)
+    if wordset & _BOOKLET:
         return ArtType.BOOKLET, None
-    if _FRONT.match(stem):
+    if wordset & _FRONT:
         return ArtType.FRONT, None
     return ArtType.OTHER, None
 

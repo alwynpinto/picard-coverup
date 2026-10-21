@@ -287,6 +287,10 @@ class Pipeline:
             ok = [c for c in pool if not c.rejected_reason]
             res.artist[art] = max(ok, key=lambda c: (c.tier.rank, c.type_confidence, c.likes, c.width * c.height), default=None)
         res.logos = sorted(res.of_type(ArtType.ARTIST_LOGO), key=lambda c: (c.type_confidence, c.likes), reverse=True)
+        # the user's own files are their choice: shown whatever their size or shape (auto-pick is already decided above)
+        for c in res.candidates:
+            if c.provider == "local":
+                c.rejected_reason = None
         # creative fallback evaluation
         cs = _creative_settings(self.s)
         for art in (ArtType.FRONT,):

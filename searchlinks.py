@@ -53,12 +53,22 @@ def _quote(s: str) -> str:
     return f'"{s}"' if s else ""
 
 
+def _artist_text(q: Query) -> str:
+    """The artist as plain words: 'Garth Knox; The Saltarello Trio' -> 'Garth Knox The Saltarello Trio'."""
+    if not q.artist or q.artist.lower() in ("various artists", "various"):
+        return ""
+    return re.sub(r"\s*[;/&]\s*|\s+", " ", q.artist.replace('"', "")).strip()
+
+
 def search_terms(q: Query, precise: bool = False) -> str:
-    """Search text. Precise adds label, catalogue number and format, which narrows to one pressing."""
-    parts = [_quote(q.artist) if q.artist and q.artist.lower() not in ("various artists", "various") else "", _quote(base_title(q.album))]
+    """Search text: the full album title, the artist and the year, as plain words (no quote marks, no
+    'cover'), which is what image search matches best. Precise adds label, catalogue number and format,
+    which narrows to one pressing."""
+    album = (q.album or "").replace('"', "").strip()
+    parts = [album, _artist_text(q)]
     if q.year:
         parts.append(str(q.year))
-    parts += edition_words(q)
+    parts += [w for w in edition_words(q) if w not in album.lower()]
     if precise:
         if q.label and q.label.lower() not in ("[no label]", "not on label"):
             parts.append(_quote(q.label))
@@ -67,7 +77,6 @@ def search_terms(q: Query, precise: bool = False) -> str:
         fw = format_word(q.format)
         if fw:
             parts.append(fw)
-    parts.append("cover")
     return " ".join(p for p in parts if p)
 
 

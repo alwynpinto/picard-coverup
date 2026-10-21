@@ -60,3 +60,15 @@ def test_local_scan_finds_jpg_png_tiff_in_the_folder_and_its_subfolders(tmp_path
     assert names == {"front.jpg", "back scan.png", "disc.tif", "inlay.jpeg"}
     tif = next(c for c in scan_folder(tmp_path) if c.comment == "disc.tif")
     assert (tif.width, tif.height) == (500, 500) and imaging._format_of(tif.data) == "jpeg" and tif.extra["source_format"] == "tif"
+
+
+def test_file_names_are_read_by_word_not_only_by_prefix():
+    from coverup.model import ArtType
+    from coverup.providers.local import classify
+
+    assert classify("Leonard - Front.jpg")[0] == ArtType.FRONT
+    assert classify("scan_back_2.png")[0] == ArtType.BACK
+    assert classify("Garth Knox - Leonard (Book of Angels) cover.tif")[0] == ArtType.FRONT
+    assert classify("CD2 label.jpg") == (ArtType.DISC, 2)
+    assert classify("IMG_0042.jpg")[0] == ArtType.OTHER
+    assert classify("booklet 03.jpg")[0] == ArtType.BOOKLET

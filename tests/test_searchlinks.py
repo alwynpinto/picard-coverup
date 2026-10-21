@@ -19,7 +19,7 @@ def test_base_title_and_edition_words():
 
 def test_plain_and_precise_terms():
     plain = search_terms(Q)
-    assert plain.startswith('"The Beatles" "Abbey Road" 1969') and plain.endswith("cover")
+    assert plain.startswith("Abbey Road (Remastered 2009) The Beatles 1969") and '"' not in plain and "cover" not in plain
     assert "Apple" not in plain
     precise = search_terms(Q, precise=True)
     assert '"Apple Records"' in precise and '"PCS 7088"' in precise and "Vinyl" in precise
@@ -37,7 +37,7 @@ def test_format_word():
 def test_various_artists_and_placeholders_are_left_out():
     va = Query(artist="Various Artists", album="Now 50", label="[no label]", catalog_number="[none]")
     t = search_terms(va, precise=True)
-    assert "Various" not in t and "[no label]" not in t and "[none]" not in t and '"Now 50"' in t
+    assert "Various" not in t and "[no label]" not in t and "[none]" not in t and "Now 50" in t
 
 
 def test_links_cover_the_main_places():
@@ -67,3 +67,8 @@ def test_store_links_use_plain_artist_and_title():
     assert got["Spotify"] == "https://open.spotify.com/search/The%20Beatles%20Abbey%20Road/albums"
     assert got["Tidal"] == "https://tidal.com/search?q=The+Beatles+Abbey+Road"
     assert all(u.startswith("https://") for u in got.values())
+
+
+def test_artist_lists_and_long_titles_become_plain_words():
+    q = Query(artist="Garth Knox; The Saltarello Trio", album="Leonard (Book of Angels, Volume 30)", year=2017)
+    assert search_terms(q) == "Leonard (Book of Angels, Volume 30) Garth Knox The Saltarello Trio 2017"

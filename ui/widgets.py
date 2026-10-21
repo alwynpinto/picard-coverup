@@ -165,7 +165,10 @@ def card_text(c: Candidate) -> str:
         extra = " · unlabelled"
     elif c.rejected_reason:
         extra = " · too small" if c.rejected_reason.startswith("Too small") else " · not eligible"
-    return f"{source_name(c)}\n{size_text(c)}{extra}"
+    name = source_name(c)
+    if c.provider == "local" and c.comment:  # which file is it? names are what you recognise your own scans by
+        name = c.comment if len(c.comment) <= 24 else c.comment[:11] + "…" + c.comment[-12:]
+    return f"{name}\n{size_text(c)}{extra}"
 
 
 def tooltip(c: Candidate) -> str:

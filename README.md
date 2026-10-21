@@ -2,7 +2,7 @@
 
 Find, compare and apply album artwork from many sources, as tags embedded in your music files, as image files in a folder you name, or both.
 
-**Version 0.5.0 · Needs MusicBrainz Picard 3.0 or newer · Python 3.10+ · GPL-2.0-or-later**
+**Version 0.5.1 · Needs MusicBrainz Picard 3.0 or newer · Python 3.10+ · GPL-2.0-or-later**
 
 ---
 
@@ -82,18 +82,18 @@ Being clear about limits saves you time. CoverUp does **not**:
 
 ### 1. Install the plugin
 
-From Picard: **Options > Plugins > Install plugin…** and give it the repository address `https://github.com/herculepirate/picard-coverup`.
+From Picard: **Options > Plugins > Install plugin…** and give it the repository address `https://github.com/alwynpinto/picard-coverup`.
 
 From a terminal:
 
 ```
-picard-cli plugins install https://github.com/herculepirate/picard-coverup
+picard-cli plugins install https://github.com/alwynpinto/picard-coverup
 ```
 
 Flatpak Picard:
 
 ```
-flatpak run --command=picard-cli org.musicbrainz.Picard plugins install https://github.com/herculepirate/picard-coverup
+flatpak run --command=picard-cli org.musicbrainz.Picard plugins install https://github.com/alwynpinto/picard-coverup
 ```
 
 Restart Picard. Right-click an album: you should see the three **CoverUp** entries. Plugins live in `~/.var/app/org.musicbrainz.Picard/data/MusicBrainz/Picard/plugins3/` on Flatpak.
@@ -152,7 +152,7 @@ Right-click an album, a cluster, a track or a file. Loose files under **Uncluste
 - **Double-click a picture** to apply just that one straight away; the window stays open for the rest.
 - **Your set** is the strip of everything you are about to apply. Remove items you do not want.
 - **Destination controls** at the bottom of the window set what to embed, which folder to save to and when to write, for this apply. They start from your saved settings.
-- **Search the web** opens an image search in your browser (Google Images limited to large images, Bing, DuckDuckGo, Discogs, the release's MusicBrainz cover art page, or the **Shops and streaming** submenu: Amazon, Spotify, Tidal, Apple Music, YouTube Music, Bandcamp, Qobuz). Queries are built from the artist, album, year and edition words (*remastered*, *deluxe*…); for "this pressing" also the label, catalogue number and format. Open a picture full size, right-click > Copy image, then press **Ctrl+V** in CoverUp, or drag it onto the window. It lands in the tab you are on. Pasted Google/Bing result links are turned into the real image address.
+- **Search the web** opens an image search in your browser (Google Images limited to large images, Bing, DuckDuckGo, Discogs, the release's MusicBrainz cover art page, or the **Shops and streaming** submenu: Amazon, Spotify, Tidal, Apple Music, YouTube Music, Bandcamp, Qobuz). Queries are plain words in the order that image search likes best: the full album title, the artist and the year, for example `Leonard (Book of Angels, Volume 30) Garth Knox The Saltarello Trio 2017` (no quote marks; multiple artists are joined with spaces); for "this pressing" also the label, catalogue number and format. Open a picture full size, right-click > Copy image, then press **Ctrl+V** in CoverUp, or drag it onto the window. It lands in the tab you are on. Pasted Google/Bing result links are turned into the real image address.
 
 ### Best order of operations
 
@@ -359,7 +359,7 @@ Example: tag albums needing attention with `$if($eq(%_coverup_status%,review),ne
 
 ## Logging and diagnostics
 
-CoverUp writes a log for troubleshooting. By default it keeps rotating 2 MB × 3 files. API keys are always masked. On Flatpak: `~/.var/app/org.musicbrainz.Picard/cache/MusicBrainz/Picard/coverup/logs/coverup.log`. The first line of each session reads `CoverUp 0.5.0 starting`, which confirms which version Picard loaded.
+CoverUp writes a log for troubleshooting. By default it keeps rotating 2 MB × 3 files. API keys are always masked. On Flatpak: `~/.var/app/org.musicbrainz.Picard/cache/MusicBrainz/Picard/coverup/logs/coverup.log`. The first line of each session reads `CoverUp 0.5.1 starting`, which confirms which version Picard loaded.
 
 To report a problem: set **Detail** to *Detailed*, reproduce it, then Advanced > **Export diagnostics…** and attach the redacted zip. Turn on *Hide folder paths and album names* first if you want the log anonymised.
 
@@ -378,7 +378,7 @@ To report a problem: set **Detail** to *Detailed*, reproduce it, then Advanced >
 Check Options > Plugins that CoverUp is installed and enabled, and restart Picard. Flatpak users: install with `flatpak run --command=picard-cli org.musicbrainz.Picard plugins install …`.
 
 **The log still says an old version.**
-Update (see below) and fully restart Picard. The first log line of the new session should read `CoverUp 0.5.0 starting`.
+Update (see below) and fully restart Picard. The first log line of the new session should read `CoverUp 0.5.1 starting`.
 
 **Nothing found for an album.**
 Look at the log for per-source lines. Common causes: no Discogs/Fanart.tv key, the album is not matched to a MusicBrainz release (Lookup first), the minimum sizes are too high for obscure releases, or the source is simply down. Lower *Smallest images to consider* and try again.
