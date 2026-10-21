@@ -46,11 +46,11 @@ from .. import glue, imaging
 from ..apply.files import FOLDER_PRESETS, validate_folder_name
 from ..creative.generate import ConsentRequired, CreativeOptions, generate, resolve_template
 from ..creative.template_engine import CUSTOM, load_templates
-from ..imageinfo import probe
 from ..model import ArtType, Candidate, Tier
 from ..pipeline import AlbumResult, PlanItem
 from ..searchlinks import links, search_terms, store_links, unwrap_image_url
 from ..settings import ARTIST_TYPES, EMBED_CHOICES
+from .crop_dialog import CropDialog
 from .widgets import SOURCE_NAMES, CandidateGrid, Preview, image_of, run_in_background
 
 log = logging.getLogger("coverup.ui")
@@ -157,7 +157,15 @@ class ReviewDialog(QDialog):
         self.add_url_btn.clicked.connect(self._add_url)
         self.clear_btn = QPushButton("Choose nothing here")
         self.clear_btn.clicked.connect(self._clear_choice)
-        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.clear_btn):
+        self.rotate_left_btn = QPushButton("Rotate left")
+        self.rotate_left_btn.clicked.connect(lambda: self._rotate(-90))
+        self.rotate_right_btn = QPushButton("Rotate right")
+        self.rotate_right_btn.clicked.connect(lambda: self._rotate(90))
+        self.crop_btn = QPushButton("Crop…")
+        self.crop_btn.clicked.connect(self._crop)
+        for b in (self.rotate_left_btn, self.rotate_right_btn, self.crop_btn):
+            b.setToolTip("Makes an edited copy of the selected picture (the original stays in the list). Edited pictures are saved as JPEG.")
+        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.rotate_left_btn, self.rotate_right_btn, self.crop_btn, self.clear_btn):
             tools.addWidget(b)
         paste = QShortcut(QKeySequence(QKeySequence.StandardKey.Paste), self.tabs)
         paste.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -405,17 +413,22 @@ class ReviewDialog(QDialog):
             self.slots.append(slot)
         self.tabs.addTab(self.creative_page, "Create")
 
+    def _with_local(self, pool: list[Candidate]) -> list[Candidate]:
+        """Every image found in the album folder is offered for front, back and disc: file names say little."""
+        have = {id(c) for c in pool}
+        return pool + [c for c in (self.result.candidates if self.result else []) if c.provider == "local" and id(c) not in have]
+
     def _pool(self, slot: Slot) -> list[Candidate]:
         res = self.result
         if res is None:
             return []
         if slot.group == "front":
-            return res.of_type(ArtType.FRONT) + [c for c in self.generated if c in slot.chosen]
+            return self._with_local(res.of_type(ArtType.FRONT) + [c for c in self.generated if c in slot.chosen])
         if slot.group == "back":
-            return res.of_type(ArtType.BACK, include_unlabelled=True)
+            return self._with_local(res.of_type(ArtType.BACK, include_unlabelled=True))
         if slot.group == "disc":
             n = len(res.discs)
-            return [c for c in res.of_type(ArtType.DISC) if n == 1 or c.disc_number in (slot.disc, None)] + res.of_type(ArtType.OTHER)
+            return self._with_local([c for c in res.of_type(ArtType.DISC) if n == 1 or c.disc_number in (slot.disc, None)] + res.of_type(ArtType.OTHER))
         if slot.group == "booklet":
             return res.of_type(ArtType.BOOKLET, include_unlabelled=True)
         return [c for c in res.candidates if c.art_type in ARTIST_TYPES]
@@ -564,7 +577,7 @@ class ReviewDialog(QDialog):
 
     def _tab_changed(self, _idx: int) -> None:
         slot = self._current_slot()
-        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.clear_btn, self.show_rejected):
+        for b in (self.search_btn, self.paste_btn, self.add_file_btn, self.add_url_btn, self.rotate_left_btn, self.rotate_right_btn, self.crop_btn, self.clear_btn, self.show_rejected):
             b.setVisible(slot is not None)
         if slot is None:
             sel = self.creative_grid.selected()
@@ -667,16 +680,16 @@ class ReviewDialog(QDialog):
         self.summary.setText(" ".join(parts))
 
     # ===================================================================================== adding
-    def _manual(self, data: bytes, url: str, label: str) -> None:
+    def _manual(self, data: bytes, url: str, label: str) -> Candidate | None:
         slot = self._current_slot()
         if slot is None:
-            return
+            return None
         if not imaging.is_valid_image(data):
-            QMessageBox.warning(self, "CoverUp", "That file is not an image CoverUp can read (JPEG, PNG, WebP, GIF or BMP).")
-            return
-        info = probe(data[:65536]) or (0, 0, "")
+            QMessageBox.warning(self, "CoverUp", "That file is not an image CoverUp can read (JPEG, PNG, TIFF, WebP, GIF or BMP).")
+            return None
+        width, height = imaging.dimensions(data) or (0, 0)
         art = slot.art_type
-        c = Candidate("manual", url or label, url, art, Tier.A, width=info[0], height=info[1], dims_known=True,
+        c = Candidate("manual", url or label, url, art, Tier.A, width=width, height=height, dims_known=True,
                       bytes=len(data), thumb_data=data, data=data, comment=label)
         fp = imaging.fingerprint(data)
         if fp:
@@ -688,9 +701,66 @@ class ReviewDialog(QDialog):
         slot.grid.add_candidate(c)
         slot.stack.setCurrentIndex(0)
         log.info("Image added by the user for %s: %s (%dx%d)", slot.key, label, c.width, c.height)
+        return c
+
+    # ---- edit: rotate and crop make a new JPEG copy in the current tab ----
+    def _edit_source(self) -> Candidate | None:
+        slot = self._current_slot()
+        if slot is None:
+            return None
+        picked = slot.grid.selected() or ([self.preview.current] if self.preview.current is not None else [])
+        if not picked:
+            QMessageBox.information(self, "CoverUp", "Click a picture first, then rotate or crop it.")
+            return None
+        return picked[0]
+
+    def _with_full_image(self, c: Candidate, then) -> None:
+        """Run ``then(data)`` with the full-size bytes, downloading them first when only a thumbnail is held."""
+        if c.data is not None:
+            then(c.data)
+            return
+        self.status.setText("Downloading the full-size image…")
+
+        def work():
+            return self.pipeline.fetch_full(c)
+
+        def done(data, error):
+            if error is not None:
+                self.status.setText(f"Could not download the image to edit it ({error}).")
+                return
+            self.status.setText("")
+            then(data)
+
+        run_in_background(work, done)
+
+    def _add_edit(self, src: Candidate, data: bytes, how: str) -> None:
+        c = self._manual(data, "", f"{src.comment or src.provider} ({how})")
+        if c is not None:
+            c.extra["edited_from"] = src.provider
+
+    def _rotate(self, degrees: int) -> None:
+        src = self._edit_source()
+        if src is None:
+            return
+        how = "rotated left" if degrees < 0 else "rotated right"
+        self._with_full_image(src, lambda data: self._add_edit(src, imaging.rotate(data, degrees, int(self.s["jpeg_quality"])), how))
+
+    def _crop(self) -> None:
+        src = self._edit_source()
+        if src is None:
+            return
+
+        def go(data: bytes) -> None:
+            dlg = CropDialog(data, self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            r = dlg.rect()
+            self._add_edit(src, imaging.crop(data, r.x(), r.y(), r.width(), r.height(), int(self.s["jpeg_quality"])), "cropped")
+
+        self._with_full_image(src, go)
 
     def _add_file(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add images", str(Path.home()), "Images (*.jpg *.jpeg *.png *.webp *.gif *.bmp)")
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add images", str(Path.home()), "Images (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.gif *.bmp)")
         for path in paths:
             try:
                 self._manual(Path(path).read_bytes(), "", Path(path).name)

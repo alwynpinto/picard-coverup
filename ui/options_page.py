@@ -117,8 +117,7 @@ LAYOUT: dict[str, list[tuple]] = {
         ("apply_min_side", "Never apply below", "int", (0, 5000, " px"), "A low-resolution cover is not applied automatically; it can trigger Create instead."),
         ("embed_max_side", "Embedded images up to", "int", (0, 10000, " px"), "Larger images are scaled down for the tags only."),
         ("file_max_side", "Saved files up to", "int", (0, 30000, " px"), None),
-        ("file_format", "File format", "choice", C(("original", "Keep the original format"), ("jpeg", "Convert to JPEG"), ("png", "Convert to PNG")), None),
-        ("jpeg_quality", "JPEG quality", "int", (50, 100, ""), "Used only when an image is resized or converted."),
+        ("jpeg_quality", "JPEG quality", "int", (50, 100, ""), "Images are always saved as JPEG; this is the quality used when one is converted from PNG or TIFF, or resized."),
         ("upscale_to_minimum", "Enlarge images smaller than the minimum (they will look soft)", "bool", None, None),
     ],
     "Create": [

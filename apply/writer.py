@@ -21,7 +21,7 @@ from . import files as F
 log = logging.getLogger("coverup.apply")
 
 _DISC_DIR = re.compile(r"^(cd|disc|disk|dvd|sacd|vinyl|side)[\s_-]*\d+$", re.IGNORECASE)
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff")
 SIDECAR = "coverup.json"
 
 # prepare(data, max_side, fmt, quality, min_side, upscale) -> (bytes, w, h, fmt)
@@ -90,7 +90,7 @@ def write_item(
     data, w, h, fmt = prepare(
         item.data,
         max_side=int(s["file_max_side"] or 0),
-        fmt=str(s["file_format"]),
+        fmt="jpeg",  # always JPEG, whatever the source (PNG, TIFF, WebP...)
         quality=int(s["jpeg_quality"]),
         min_side=s.min_side_for(item.art_type),
         upscale=bool(s["upscale_to_minimum"]),

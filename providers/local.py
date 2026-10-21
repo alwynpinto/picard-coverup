@@ -13,9 +13,10 @@ from ..matching.disc import parse_disc_number
 from ..model import ArtType, Candidate, Query, Tier
 from .base import Provider
 
-IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".gif", ".bmp"}
 SUBFOLDERS = ("covers", "cover", "art", "artwork", "artworks", "scans", "booklet", "images")
-MAX_LOCAL = 40
+MAX_LOCAL = 60
+SKIP_DIRS = {".coverup-backup"}
 
 _FRONT = re.compile(r"^(cover|folder|front|album|albumart|albumartsmall)\b", re.IGNORECASE)
 _BACK = re.compile(r"^(back|rear|backcover|back-cover)\b", re.IGNORECASE)
@@ -40,7 +41,11 @@ def classify(name: str) -> tuple[ArtType, int | None]:
 def scan_folder(folder: str | Path) -> list[Candidate]:
     base = Path(folder)
     out: list[Candidate] = []
-    dirs = [base] + [base / s for s in SUBFOLDERS if (base / s).is_dir()]
+    dirs = [base]
+    try:  # every sub-folder, not only the usual names: scans are kept under all sorts of names
+        dirs += sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in SKIP_DIRS)
+    except OSError:
+        pass
     for d in dirs:
         try:
             entries = sorted(p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXT)
@@ -54,14 +59,25 @@ def scan_folder(folder: str | Path) -> list[Candidate]:
                 data = p.read_bytes()
             except OSError:
                 continue
+            source_format = p.suffix.lower().lstrip(".")
             info = probe(data[:65536])
             w, h = (info[0], info[1]) if info else (0, 0)
+            if not info:  # TIFF and friends: decode once (Qt) and keep a JPEG, so previews stay light
+                try:
+                    from .. import imaging
+
+                    data = imaging.to_jpeg(data)
+                    w, h = imaging.dimensions(data) or (0, 0)
+                    info = (w, h, "jpeg") if w else None
+                except Exception:  # noqa: BLE001 - an unreadable file is simply not offered
+                    continue
             c = Candidate(
                 "local", str(p), p.as_uri(), art, Tier.B, width=w, height=h, bytes=len(data), dims_known=bool(info),
                 disc_number=disc, thumb_data=data, data=data, attribution="local file", comment=p.name,
                 type_confidence=0.9 if art != ArtType.OTHER else 0.2,
             )
             c.extra["local_path"] = str(p)
+            c.extra["source_format"] = source_format
             out.append(c)
     return out
 

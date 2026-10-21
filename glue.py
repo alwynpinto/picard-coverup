@@ -341,7 +341,7 @@ def embed(target, items: list[PlanItem], s: Settings) -> list[str]:
         if c.data is None:
             notes.append(f"{it.art_type.value}: image data missing")
             continue
-        data, w, h, _fmt = imaging.prepare(c.data, int(s["embed_max_side"] or 0), "original", int(s["jpeg_quality"]))
+        data, w, h, _fmt = imaging.prepare(c.data, int(s["embed_max_side"] or 0), "jpeg", int(s["jpeg_quality"]))
         comment = c.comment if c.generated else (f"CoverUp: {c.provider}" if s["record_source_in_comment"] else "")
         if it.art_type == ArtType.DISC:
             comment = (comment + f" disc {it.disc_number}").strip()

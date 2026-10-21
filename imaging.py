@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
 from PyQt6.QtGui import QImage
 
+from .imageinfo import probe
 from .matching.phash import dhash, is_blank, trim_uniform_margins
 
 GRID = 64
@@ -39,6 +40,8 @@ def _format_of(data: bytes) -> str:
         return "webp"
     if data[:3] == b"GIF":
         return "gif"
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return "tiff"
     return "unknown"
 
 
@@ -72,6 +75,45 @@ def size_of(data: bytes) -> tuple[int, int] | None:
     return None if img.isNull() else (img.width(), img.height())
 
 
+def dimensions(data: bytes) -> tuple[int, int] | None:
+    """Width and height: from the header when it is cheap (JPEG, PNG...), by decoding otherwise (TIFF)."""
+    info = probe(data[:65536])
+    return (info[0], info[1]) if info else size_of(data)
+
+
+def to_jpeg(data: bytes, quality: int = 95) -> bytes:
+    """The image as a JPEG. JPEG input is returned untouched (no second generation of compression)."""
+    if _format_of(data) == "jpeg":
+        return data
+    img = load(data)
+    if img.isNull():
+        raise ValueError("Not a decodable image")
+    return encode(img, "jpeg", quality)
+
+
+def rotate(data: bytes, degrees: int, quality: int = 95) -> bytes:
+    """Rotate by a multiple of 90 degrees (positive = clockwise) and return a JPEG."""
+    img = load(data)
+    if img.isNull():
+        raise ValueError("Not a decodable image")
+    turns = (int(degrees) // 90) % 4
+    if turns:
+        from PyQt6.QtGui import QTransform
+
+        img = img.transformed(QTransform().rotate(90 * turns), Qt.TransformationMode.SmoothTransformation)
+    return encode(img, "jpeg", quality)
+
+
+def crop(data: bytes, x: int, y: int, w: int, h: int, quality: int = 95) -> bytes:
+    """Cut out a rectangle (pixels, clamped to the image) and return a JPEG."""
+    img = load(data)
+    if img.isNull():
+        raise ValueError("Not a decodable image")
+    x, y = max(0, min(int(x), img.width() - 1)), max(0, min(int(y), img.height() - 1))
+    w, h = max(1, min(int(w), img.width() - x)), max(1, min(int(h), img.height() - y))
+    return encode(img.copy(x, y, w, h), "jpeg", quality)
+
+
 def is_valid_image(data: bytes) -> bool:
     return bool(data) and not load(data).isNull()
 
@@ -98,7 +140,7 @@ def encode(img: QImage, fmt: str = "jpeg", quality: int = 92) -> bytes:
 
 
 def prepare(
-    data: bytes, max_side: int = 0, fmt: str = "original", quality: int = 92, min_side: int = 0, upscale: bool = False
+    data: bytes, max_side: int = 0, fmt: str = "jpeg", quality: int = 92, min_side: int = 0, upscale: bool = False
 ) -> tuple[bytes, int, int, str]:
     """Resize (never up unless ``upscale``) and/or convert. Returns (bytes, width, height, format).
 

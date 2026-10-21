@@ -2,7 +2,7 @@
 
 Find, compare and apply album artwork from many sources, as tags embedded in your music files, as image files in a folder you name, or both.
 
-**Version 0.4.1 · Needs MusicBrainz Picard 3.0 or newer · Python 3.10+ · GPL-2.0-or-later**
+**Version 0.5.0 · Needs MusicBrainz Picard 3.0 or newer · Python 3.10+ · GPL-2.0-or-later**
 
 ---
 
@@ -36,11 +36,12 @@ CoverUp asks many sources at once, tells you how sure it is (exact release, same
 
 ## What you get
 
-- **Many sources, one window.** Cover Art Archive, Discogs, Wikimedia Commons, Fanart.tv, TheAudioDB, Apple Music (iTunes), Deezer, Last.fm, optional paid web image search, and images already in the album folder.
+- **Many sources, one window.** Cover Art Archive, Discogs, Wikimedia Commons, Fanart.tv, TheAudioDB, Apple Music (iTunes), Deezer, Last.fm, optional paid web image search, and images already in your album folder (JPG, PNG and TIFF, including sub-folders).
 - **Exact release first.** Art tied to the exact MusicBrainz or Discogs release you tagged wins; otherwise the picture most independent sources agree on.
 - **Every art type.** Front, back, disc (matched to the right disc), booklet pages and artist images (photo, logo, background, banner). You choose which.
 - **Tags, files or both.** Embed the front cover for your player, keep full-size scans as files for your media server. Naming presets for Kodi/Jellyfin and Plex.
 - **Safe by design.** Replaced files are backed up, **Undo last apply** restores them, nothing is applied when sources disagree, and every file written is recorded in `coverup.json`.
+- **Your own scans, edited in place.** Every JPG, PNG and TIFF in the album folder (and its sub-folders) is offered in the Front, Back and Disc tabs, whatever it is called. **Rotate left**, **Rotate right** and **Crop…** make an edited JPEG copy without touching the original.
 - **Review window.** Large preview, comparison with your current cover, plain-language labels, double-click to apply one image, paste or drag in a picture you found yourself, and a **Search the web** menu that opens image searches in your browser, pre-filled with artist, album, year and edition.
 - **Works from Picard's own cover art lookup.** CoverUp can be ticked in Options > Cover Art like the built-in providers.
 - **Creative fallback (off by default).** When no real cover exists, make one: fan art, your own AI image service, or an offline renderer. Always labelled as generated.
@@ -57,6 +58,7 @@ Being clear about limits saves you time. CoverUp does **not**:
 | Download from sources needing an account you have not set up | Discogs needs your token; Fanart.tv needs a free key for logos, backgrounds, banners and disc art. Without them those sources are skipped (never an error). |
 | Embed disc art, booklets or artist images through Picard's own cover art lookup | In that mode only the **front and back** are handed to Picard (Picard puts an image on every track, which is wrong for disc art and booklets). CoverUp writes the rest as files. Use the review window or Auto-apply to embed a disc's art into that disc's files. |
 | Embed artist images in tags | Artist images are files only (in the artist folder). |
+| Save anything but JPEG | By design everything written or embedded is JPEG. PNG and TIFF sources are converted (transparency becomes white). Keep your TIFF masters elsewhere; CoverUp never modifies the originals. |
 | Generate back, disc or booklet art | Generated art is for the **front cover only**. The other types are always real scans. |
 | Label Discogs' extra images | Discogs does not say which secondary image is a back cover or booklet page. They are offered in the Back, Disc and Booklet tabs for you to choose, and are never selected automatically. |
 | Keep up with a Lookup you do afterwards | A Picard Lookup or Scan replaces a file's tags, cover included, with the release's. CoverUp then drops the image files it had queued for that file and tells you. Best order: **Lookup or Scan first, then CoverUp.** |
@@ -146,6 +148,7 @@ Right-click an album, a cluster, a track or a file. Loose files under **Uncluste
 - One tab per art type: Front, Back, each disc, Booklet, Artist, and Create.
 - Each picture carries a label: **Exact release**, **Same album** (possibly another edition), **Search match**, or **Generated**. Select one to see why in the preview panel.
 - **CoverUp pick** marks the automatic choice. Resolution, source and licence (for Wikimedia images) are shown.
+- **Rotate left / Rotate right / Crop…** work on the selected picture (from any source, including your own files). They make an edited copy that appears next to the original in the same tab and is selected; the original is never changed. Crop: drag a box over the picture, drag inside it to move it, and tick or untick *Keep it square* (on by default, because covers are square). Edited pictures are JPEG.
 - **Double-click a picture** to apply just that one straight away; the window stays open for the rest.
 - **Your set** is the strip of everything you are about to apply. Remove items you do not want.
 - **Destination controls** at the bottom of the window set what to embed, which folder to save to and when to write, for this apply. They start from your saved settings.
@@ -236,8 +239,7 @@ Which image to prefer, the smallest to consider, and what to do on the way out.
 | **Never apply below** | 600 px | A cover below this is not applied automatically. It can trigger the Create fallback. `0` = any size. |
 | **Embedded images up to** | 1200 px | Longest side for images going into tags; larger ones are scaled down for the tags only. `0` = full size. Keeps your music files from growing. |
 | **Saved files up to** | Original size (0) | Longest side for files; `0` keeps the scan as it is. |
-| **File format** | Keep the original | *Keep*, *Convert to JPEG*, or *Convert to PNG*. |
-| **JPEG quality** | 95 | Used only when an image is resized or converted. |
+| **JPEG quality** | 95 | **Everything CoverUp saves or embeds is a JPEG**: PNG, TIFF and WebP sources are converted, and JPEG sources are left exactly as they are unless resized. This is the quality used when converting or resizing. |
 | **Enlarge images smaller than the minimum** | Off | Upscales small images up to the minimum. They will look soft; leave off unless a device needs a minimum size. |
 
 Images are never upscaled unless you turn that on.
@@ -357,7 +359,7 @@ Example: tag albums needing attention with `$if($eq(%_coverup_status%,review),ne
 
 ## Logging and diagnostics
 
-CoverUp writes a log for troubleshooting. By default it keeps rotating 2 MB × 3 files. API keys are always masked. On Flatpak: `~/.var/app/org.musicbrainz.Picard/cache/MusicBrainz/Picard/coverup/logs/coverup.log`. The first line of each session reads `CoverUp 0.4.1 starting`, which confirms which version Picard loaded.
+CoverUp writes a log for troubleshooting. By default it keeps rotating 2 MB × 3 files. API keys are always masked. On Flatpak: `~/.var/app/org.musicbrainz.Picard/cache/MusicBrainz/Picard/coverup/logs/coverup.log`. The first line of each session reads `CoverUp 0.5.0 starting`, which confirms which version Picard loaded.
 
 To report a problem: set **Detail** to *Detailed*, reproduce it, then Advanced > **Export diagnostics…** and attach the redacted zip. Turn on *Hide folder paths and album names* first if you want the log anonymised.
 
@@ -376,7 +378,7 @@ To report a problem: set **Detail** to *Detailed*, reproduce it, then Advanced >
 Check Options > Plugins that CoverUp is installed and enabled, and restart Picard. Flatpak users: install with `flatpak run --command=picard-cli org.musicbrainz.Picard plugins install …`.
 
 **The log still says an old version.**
-Update (see below) and fully restart Picard. The first log line of the new session should read `CoverUp 0.4.1 starting`.
+Update (see below) and fully restart Picard. The first log line of the new session should read `CoverUp 0.5.0 starting`.
 
 **Nothing found for an album.**
 Look at the log for per-source lines. Common causes: no Discogs/Fanart.tv key, the album is not matched to a MusicBrainz release (Lookup first), the minimum sizes are too high for obscure releases, or the source is simply down. Lower *Smallest images to consider* and try again.

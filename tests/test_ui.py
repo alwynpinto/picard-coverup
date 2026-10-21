@@ -293,3 +293,37 @@ def test_options_page_has_an_artists_tab_with_its_own_switches(picard_env, monke
     page.save()
     cfg = cls.api.plugin_config
     assert cfg["artist_art"] is False and set(cfg["artist_types"]) == {"thumb", "logo", "banner"} and cfg["min_artist"] == 800
+
+
+def test_local_images_are_offered_everywhere_and_can_be_rotated_and_cropped(picard_env, state, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from coverup import imaging
+    from coverup.model import ArtType, Candidate, Tier
+    from coverup.ui import review_dialog
+
+    dlg, _album, _ = open_dialog(picard_env, state)
+    data = make_image("a", w=800, h=400)
+    local = Candidate("local", "/x/odd name.png", "file:///x/odd name.png", ArtType.OTHER, Tier.B, width=800, height=400, dims_known=True,
+                      data=data, thumb_data=data, comment="odd name.png")
+    dlg.result.candidates.append(local)
+    dlg._refresh_all()
+    for key in ("front", "back", "disc1", "disc2"):
+        assert local in slot(dlg, key).grid.all(), key
+
+    dlg.tabs.setCurrentIndex(dlg.slots.index(slot(dlg, "back")))
+    grid = slot(dlg, "back").grid
+    grid.setCurrentRow([c for c in grid.all()].index(local))
+    grid.item([c for c in grid.all()].index(local)).setSelected(True)
+    dlg._rotate(90)
+    edited = [c for c in grid.all() if c.provider == "manual" and "rotated right" in c.comment]
+    assert len(edited) == 1 and (edited[0].width, edited[0].height) == (400, 800)
+    assert imaging._format_of(edited[0].data) == "jpeg" and local in grid.all()  # the original stays
+
+    grid.clearSelection()
+    grid.item([c for c in grid.all()].index(local)).setSelected(True)
+    monkeypatch.setattr(review_dialog.CropDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(review_dialog.CropDialog, "rect", lambda self: type("R", (), {"x": lambda s: 100, "y": lambda s: 0, "width": lambda s: 400, "height": lambda s: 400})())
+    dlg._crop()
+    cropped = [c for c in grid.all() if "cropped" in c.comment]
+    assert len(cropped) == 1 and (cropped[0].width, cropped[0].height) == (400, 400)

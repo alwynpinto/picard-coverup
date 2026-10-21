@@ -61,13 +61,13 @@ def test_invalid_folder_name_is_refused(tmp_path):
         targets_for(FileItem(ArtType.BACK, b""), tmp_path, S(folder_name="../x"))
 
 
-def test_write_item_respects_file_limits_and_format(tmp_path):
+def test_write_item_respects_file_limits_and_is_always_jpeg(tmp_path):
     big = make_image("a", 2000)
-    s = S(file_max_side=1000, file_format="png")
+    s = S(file_max_side=1000)
     from coverup.apply.writer import Target
 
     r = write_item(FileItem(ArtType.FRONT, big), Target(tmp_path, "cover"), s, imaging.prepare, "b1")
-    assert r.action == "written" and r.path.name == "cover.png"
+    assert r.action == "written" and r.path.name == "cover.jpg"
     assert imaging.size_of(r.path.read_bytes()) == (1000, 1000)
 
 

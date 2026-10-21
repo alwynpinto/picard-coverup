@@ -124,7 +124,6 @@ DEFAULTS: dict[str, Any] = {
     "name_artist_background": "fanart",
     "name_artist_banner": "banner",
     "save_artist_art": True,  # write artist images into the artist folder (parent of the album folder)
-    "file_format": "original",  # original | jpeg | png
     "jpeg_quality": 95,
     "collision_policy": "if_better",  # skip | overwrite | if_better | keep_both
     "backups": True,

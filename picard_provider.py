@@ -97,7 +97,7 @@ def make_provider_class(Base):
             c = item.candidate
             if c.data is None:
                 return
-            data, w, h, _fmt = imaging.prepare(c.data, int(s["embed_max_side"] or 0), "original", int(s["jpeg_quality"]))
+            data, w, h, _fmt = imaging.prepare(c.data, int(s["embed_max_side"] or 0), "jpeg", int(s["jpeg_quality"]))
             comment = c.comment if c.generated else (f"CoverUp: {c.provider}" if s["record_source_in_comment"] else "")
             self.queue_put(glue._make_image(data, item.art_type, comment, c.url))
             log.info("Handed the %s from %s (%dx%d) to Picard", item.art_type.value, c.provider, w, h)
